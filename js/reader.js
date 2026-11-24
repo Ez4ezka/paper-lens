@@ -140,7 +140,7 @@ export async function openReader(id, focus) {
   showLoader('Opening the paper…');
   let blob = await getPdf(id);
   if (!blob && syncOn() && meta.pdfRemote) {
-    showLoader('Downloading the PDF from your GitHub library…');
+    showLoader('Downloading the PDF from your cloud library…');
     try { blob = await downloadPdf(id); if (blob) await putPdf(id, blob); } catch (e) { toast(e.message); }
   }
   if (tok !== R.loadToken) return;
@@ -190,7 +190,7 @@ function hideLoader() { $('#loader').hidden = true; }
 function showMissing(meta) {
   const l = $('#loader'); l.hidden = false;
   l.innerHTML = `<div class="missing"><h2>This PDF isn’t on this device yet</h2>
-    <p>Your highlights and notes for <b>${esc(meta.title)}</b> are here, but the PDF file itself isn’t. ${syncOn() ? 'It wasn’t uploaded to your GitHub library (maybe “Save PDFs” is off, or it’s still uploading from another device).' : 'Turn on sync in Settings so PDFs follow you to every device.'}</p>
+    <p>Your highlights and notes for <b>${esc(meta.title)}</b> are here, but the PDF file itself isn’t in your cloud library yet. It may still be uploading from the device where you opened it. Try again in a minute, or choose the file below.</p>
     <label class="btn pri" for="refind">Choose the PDF file</label><input type="file" id="refind" accept="application/pdf,.pdf" hidden></div>`;
   $('#refind').onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
@@ -437,7 +437,7 @@ async function createHighlight(p, sh) {
   await persist();
   try {
     const [text, c] = await Promise.all([textIn(p, sh), crop(p, sh, { maxSide: 900, outline: false })]);
-    h.text = text; h.img = canvasThumb(c, 640, .8); h.updatedAt = Date.now();
+    h.text = text; h.img = canvasThumb(c, 520, .74); h.updatedAt = Date.now();
   } catch (e) {}
   if (h.deleted) return;
   renderHlList(); await persist();
@@ -566,7 +566,7 @@ async function newThread(p, sh, typed, prep) {
   t.sel = sel || '';
   if (c) {
     R.imgCache.set(t.id, await canvasToBlob(c));
-    t.thumb = canvasThumb(c, 700, .8);
+    t.thumb = canvasThumb(c, 600, .74);
     const img = v.card.querySelector('.thumb img'); if (img) img.src = t.thumb;
   }
   bubble.remove();

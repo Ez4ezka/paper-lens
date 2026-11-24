@@ -6,37 +6,36 @@ Read research papers with AI. Open any PDF, then:
 - **Highlight**: pick the highlighter and one of five colors, then drag over text, formulas or figures. Click a highlight to add a note, change its color, or ask AI about it.
 - **Home page**: every paper you've read, plus every highlight from every paper in one place. Filter by color, search, group by paper or color, and export to Markdown.
 
-It works with **Claude** (Anthropic API), **ChatGPT** (OpenAI API) or **any model on OpenRouter**. You can switch models from the menu at the top of the page at any time.
+It works with **Claude** (Anthropic API), **ChatGPT** (OpenAI API) or **any model on OpenRouter**. You can switch models from the menu at the top of the page at any time, and your library is saved to the cloud so it's the same on every device.
 
 ## How it works
 
-Paper Lens is a static website (plain HTML, CSS and JavaScript, no build step), so it runs on GitHub Pages for free.
+Paper Lens runs on **Vercel**: a static front end plus a few small server functions in `api/`.
 
-- **AI**: your browser calls the AI provider directly with **your own API key**. Keys are stored only in that browser. API usage is billed by the provider and is separate from a ChatGPT Plus or Claude Pro subscription.
-- **Your library**: papers, highlights and notes are saved in the browser first (IndexedDB), so everything works offline and instantly.
-- **Sync across devices** (optional): Paper Lens keeps a copy in a **private GitHub repository you own**, using a fine-grained token that can only touch that one repository:
+- **Sign-in**: one password (the `APP_PASSWORD` environment variable). Sign in on any device to see the same library.
+- **Your library** lives in a **private Vercel Blob store**: PDFs, highlights, notes and preferences. Each device also keeps a local copy, so it opens instantly and works offline, then syncs.
 
   ```
-  library/index.json          your papers (title, counts, small cover image)
+  library/index.json          your papers (title, small cover image)
   library/papers/<id>.json    highlights and notes for one paper
-  library/pdfs/<id>.pdf       the PDF itself (optional, up to 45 MB each)
+  library/pdfs/<id>.pdf       the PDF (stored in parts if it is over 3.5 MB)
+  library/prefs.json          model choices, colors, answer style
+  config/secrets.json         your AI keys (never sent to the browser)
   ```
+- **AI**: the browser sends your question to `/api/ai`, which adds your saved API key and streams the answer back from Claude, OpenAI or OpenRouter. API use is billed by the provider, separately from a ChatGPT Plus or Claude Pro subscription.
+- **Free-plan limits**: Vercel's Hobby plan includes 1 GB of Blob storage and about 2,000 writes a month, so changes are saved in batches (about every 45 seconds, and whenever you leave the page).
 
 ## Set up
 
-1. **Add an AI key.** Open Settings (gear icon) → *AI models*. Paste a key from one or more of:
-   - Claude: https://console.anthropic.com/settings/keys
-   - ChatGPT: https://platform.openai.com/api-keys (OpenAI sometimes blocks calls made directly from web pages; if so, use OpenRouter)
-   - OpenRouter: https://openrouter.ai/keys (one key for GPT, Claude, Gemini and more)
+1. Open the site and sign in with your password.
+2. Settings (gear icon) → *AI models*: paste a key from Claude (https://console.anthropic.com/settings/keys), OpenAI (https://platform.openai.com/api-keys) or OpenRouter (https://openrouter.ai/keys) and press *Save*. Pick a model from the menu at the top.
+3. On your phone, open the same address and sign in. Use *Add to Home Screen* so it opens like an app.
 
-   Press *Load models*, then pick a model from the menu at the top.
-2. **Turn on sync** (to use it on your phone and other computers). Settings → *Sync*:
-   1. Create a **private** repository, for example `paper-lens-data`.
-   2. Create a **fine-grained personal access token** at https://github.com/settings/personal-access-tokens/new. Under *Repository access*, choose *Only select repositories* and pick that repository. Under *Repository permissions*, set *Contents* to *Read and write*.
-   3. Paste the repository (`your-name/paper-lens-data`) and the token, then press *Connect*.
-3. **Set up your other devices.** Settings → *Other devices* → choose a passphrase → *Copy setup link*. Open that link on your phone and enter the passphrase. It brings over your keys, models, sync settings and colors, encrypted with the passphrase.
+## Deploying your own copy
 
-On a phone you can use *Add to Home Screen* so it opens like an app.
+1. Import this repository into Vercel (no build step, no framework).
+2. Create a **private** Blob store and connect it to the project.
+3. Add environment variables `APP_PASSWORD` (your sign-in password) and `SESSION_SECRET` (any long random string; change it to sign out every device).
 
 ## Keyboard shortcuts (in a paper)
 
@@ -51,14 +50,10 @@ On a phone you can use *Add to Home Screen* so it opens like an app.
 | `Enter` | Send the question |
 | `Esc` | Cancel the selection |
 
-## Hosting it yourself
-
-Push this folder to a GitHub repository, then go to **Settings → Pages**, set *Source* to *Deploy from a branch*, and choose `main` and `/ (root)`. The site will be at `https://<your-name>.github.io/<repo>/`.
-
 ## Privacy and security notes
 
-- API keys and the GitHub token are stored in your browser's local storage on each device. Anyone with access to that browser profile could read them. Use a fine-grained GitHub token limited to the one data repository, and set spending limits on your AI provider accounts.
-- Your data repository must be **private** if your papers or notes are private.
+- Everything is stored in a private Blob store that only the server functions can read, and only after sign-in.
+- Choose a strong password. Changing `SESSION_SECRET` signs out every device.
 
 ## Credits
 

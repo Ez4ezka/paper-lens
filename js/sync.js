@@ -1,224 +1,186 @@
-// Sync the library to a private GitHub repository the user owns.
-// Layout in the repo:
-//   library/index.json          list of papers (title, counts, small cover)
+// Keeps the library in your private cloud storage (Vercel Blob, through /api/file).
+// Layout:
+//   library/index.json          list of papers (title, small cover, version of their notes)
 //   library/papers/<id>.json    highlights + notes for one paper
-//   library/pdfs/<id>.pdf       the PDF itself (optional)
-import { settings, saveSettings, mergeData, getDirty, clearDirty, counts, emptyData } from './store.js';
-import { idbGet, idbPut, idbAll, utf8B64, b64Utf8, bytesToB64 } from './util.js';
+//   library/pdfs/<id>.pdf       the PDF itself
+//   library/prefs.json          model choices, colors, answer style
+// Files over 3.5 MB are stored in parts with a small manifest at the main path.
+import { settings, mergeData, getDirty, clearDirty, counts, emptyData, sharedPrefs, applySharedPrefs } from './store.js';
+import { idbGet, idbPut, idbAll, uid } from './util.js';
+import { api, getToken, errorFrom } from './api.js';
 
-const API = 'https://api.github.com';
 export const syncState = { status: 'off', msg: '', at: 0 };
 let running = false, again = false, timer = 0;
+const PART = 3_500_000;
+const enc = new TextEncoder(), dec = new TextDecoder();
 
 function set(status, msg = '') {
   Object.assign(syncState, { status, msg });
   if (status === 'idle') syncState.at = Date.now();
   dispatchEvent(new CustomEvent('pl:sync', { detail: syncState }));
 }
-export const syncOn = () => !!(settings.gh.token && /^[\w.-]+\/[\w.-]+$/.test(settings.gh.repo.trim()));
+export const syncOn = () => !!getToken();
 
-class GhError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
+class Conflict extends Error { constructor() { super('conflict'); this.conflict = true; } }
+const fileURL = (p, cache) => `api/file?path=${encodeURIComponent(p)}${cache ? '&cache=1' : ''}`;
 
-async function gh(path, opts = {}) {
-  let r;
-  try {
-    r = await fetch(API + path, {
-      method: opts.method || 'GET',
-      body: opts.body,
-      cache: 'no-store',
-      headers: {
-        Authorization: 'Bearer ' + settings.gh.token.trim(),
-        Accept: opts.accept || 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
-      },
-    });
-  } catch (e) { throw new GhError('Could not reach GitHub. Check your connection.', 0); }
-  return r;
-}
-async function fail(r) {
-  let m = '';
-  try { m = (await r.json()).message || ''; } catch (e) {}
-  if (r.status === 401) return new GhError('GitHub rejected the token. Make a new one in Settings.', 401);
-  if (r.status === 403 && /rate limit/i.test(m)) return new GhError('GitHub rate limit hit. Sync will try again later.', 403);
-  if (r.status === 403) return new GhError('The token can’t write to that repository. Give it “Contents: Read and write”.', 403);
-  if (r.status === 404) return new GhError('Repository not found, or the token can’t see it.', 404);
-  return new GhError(`GitHub error ${r.status}${m ? ': ' + m : ''}`, r.status);
-}
-const R = () => settings.gh.repo.trim();
-const B = () => settings.gh.branch || 'main';
-
-async function ensureBranch() {
-  const r = await gh(`/repos/${R()}`);
-  if (!r.ok) throw await fail(r);
-  const j = await r.json();
-  if (!j.permissions || !(j.permissions.push || j.permissions.admin || j.permissions.maintain)) {
-    // fine-grained tokens report permissions per repo; continue and let the write tell us
-  }
-  const b = j.default_branch || 'main';
-  if (settings.gh.branch !== b) { settings.gh.branch = b; saveSettings(); }
-  return j;
-}
-
-async function getJSON(path) {
-  const r = await gh(`/repos/${R()}/contents/${path}?ref=${encodeURIComponent(B())}`);
+async function getFile(path, { cache = false } = {}) {
+  const r = await api(fileURL(path, cache));
   if (r.status === 404) return null;
-  if (!r.ok) throw await fail(r);
-  const j = await r.json();
-  let text;
-  if (j.content && j.encoding === 'base64') text = b64Utf8(j.content);
-  else {
-    const r2 = await gh(`/repos/${R()}/contents/${path}?ref=${encodeURIComponent(B())}`, { accept: 'application/vnd.github.raw+json' });
-    if (!r2.ok) throw await fail(r2);
-    text = await r2.text();
-  }
-  return { data: JSON.parse(text), sha: j.sha };
+  if (!r.ok) throw await errorFrom(r);
+  return { bytes: new Uint8Array(await r.arrayBuffer()), etag: r.headers.get('etag'), type: r.headers.get('content-type') || '' };
+}
+async function putFile(path, bytes, { ifMatch, createOnly, type = 'application/octet-stream' } = {}) {
+  const headers = { 'content-type': type };
+  if (ifMatch) headers['if-match'] = ifMatch; else if (createOnly) headers['if-none-match'] = '*';
+  const r = await api(fileURL(path), { method: 'PUT', body: bytes, headers });
+  if (r.status === 412) throw new Conflict();
+  if (!r.ok) throw await errorFrom(r);
+  return (await r.json()).etag;
 }
 
-async function putB64(path, b64, sha, message) {
-  const r = await gh(`/repos/${R()}/contents/${path}`, {
-    method: 'PUT',
-    body: JSON.stringify({ message, content: b64, branch: B(), ...(sha ? { sha } : {}) }),
-  });
-  if (r.status === 409 || r.status === 422) {
-    let m = ''; try { m = (await r.json()).message || ''; } catch (e) {}
-    const e = new GhError(r.status === 409 || /sha/i.test(m) ? 'conflict: ' + m : `GitHub refused the file: ${m}`, r.status);
-    e.conflict = r.status === 409 || /sha/i.test(m);
-    throw e;
+export async function readBig(path, opts) {
+  const f = await getFile(path, opts);
+  if (!f) return null;
+  if (f.bytes.length < 4000 && f.bytes[0] === 123) {
+    let m = null; try { m = JSON.parse(dec.decode(f.bytes)); } catch (e) {}
+    if (m && m.__chunks) {
+      const parts = [];
+      for (let i = 0; i < m.__chunks; i++) {
+        const p = await getFile(`${path}.${m.ver}.${i}`, { cache: true });
+        if (!p) throw new Error('Part of a file is missing in cloud storage.');
+        parts.push(p.bytes);
+      }
+      const all = new Uint8Array(parts.reduce((s, p) => s + p.length, 0));
+      let o = 0; for (const p of parts) { all.set(p, o); o += p.length; }
+      return { bytes: all, etag: f.etag };
+    }
   }
-  if (!r.ok) throw await fail(r);
-  const j = await r.json();
-  return j.content && j.content.sha;
+  return f;
 }
-
-export async function testConnection() {
-  if (!syncOn()) throw new GhError('Add a repository (owner/name) and a token first.', 0);
-  const repo = await ensureBranch();
-  return { name: repo.full_name, private: repo.private };
+export async function writeBig(path, bytes, { ifMatch, createOnly, type } = {}) {
+  if (bytes.length <= PART) return putFile(path, bytes, { ifMatch, createOnly, type });
+  const ver = uid(), n = Math.ceil(bytes.length / PART);
+  for (let i = 0; i < n; i++) await putFile(`${path}.${ver}.${i}`, bytes.subarray(i * PART, (i + 1) * PART));
+  return putFile(path, enc.encode(JSON.stringify({ __chunks: n, ver, size: bytes.length, type })), { ifMatch, createOnly, type: 'application/json' });
 }
+async function readJSON(path) {
+  const f = await readBig(path);
+  if (!f) return null;
+  return { data: JSON.parse(dec.decode(f.bytes)), etag: f.etag };
+}
+const writeJSON = (path, data, etag) => writeBig(path, enc.encode(JSON.stringify(data)), { ifMatch: etag || undefined, createOnly: !etag, type: 'application/json' });
 
 export async function downloadPdf(id) {
-  const r = await gh(`/repos/${R()}/contents/library/pdfs/${id}.pdf?ref=${encodeURIComponent(B())}`, { accept: 'application/vnd.github.raw+json' });
-  if (r.status === 404) return null;
-  if (!r.ok) throw await fail(r);
-  return new Blob([await r.arrayBuffer()], { type: 'application/pdf' });
+  const f = await readBig(`library/pdfs/${id}.pdf`, { cache: true });
+  return f ? new Blob([f.bytes], { type: 'application/pdf' }) : null;
 }
 
-const strip = m => { const { thumbLocal, ...rest } = m; return rest; };
-
+/* ---------- one sync pass ---------- */
 async function syncOnce() {
-  await ensureBranch();
   const dirty = await getDirty();
-  const synced = (await idbGet('kv', 'synced')) || {};
-  const remoteIdx = await getJSON('library/index.json');
-  let rPapers = (remoteIdx && remoteIdx.data && remoteIdx.data.papers) || {};
-  let idxSha = remoteIdx && remoteIdx.sha;
-
-  const localList = await idbAll('papers');
-  const local = Object.fromEntries(localList.map(p => [p.id, p]));
-  const ids = new Set([...Object.keys(rPapers), ...Object.keys(local)]);
+  const tags = (await idbGet('kv', 'synced')) || {};
   let changedLocal = false;
+
+  // shared preferences (models, colors, answer style)
+  const rp = await readJSON('library/prefs.json');
+  if (rp && (rp.data.updatedAt || 0) > (settings.prefsAt || 0)) { applySharedPrefs(rp.data); changedLocal = true; }
+  else if (!rp || (settings.prefsAt || 0) > (rp.data.updatedAt || 0)) {
+    try { await writeJSON('library/prefs.json', { ...sharedPrefs(), updatedAt: settings.prefsAt || Date.now() }, rp && rp.etag); }
+    catch (e) { if (!e.conflict) throw e; again = true; }
+  }
+
+  const remoteIdx = await readJSON('library/index.json');
+  let rPapers = (remoteIdx && remoteIdx.data.papers) || {};
+  let idxTag = remoteIdx && remoteIdx.etag;
+  const local = Object.fromEntries((await idbAll('papers')).map(p => [p.id, p]));
+  const ids = new Set([...Object.keys(rPapers), ...Object.keys(local)]);
 
   for (const id of ids) {
     const rm = rPapers[id], lm = local[id];
-    // 1. paper details: newest wins
     let meta = lm;
     if (rm && (!lm || (rm.updatedAt || 0) > (lm.updatedAt || 0))) {
       meta = { ...(lm || {}), ...rm, openedAt: Math.max((lm && lm.openedAt) || 0, rm.openedAt || 0) };
       changedLocal = true;
     }
-    // 2. highlights + notes
-    const needPull = rm && rm.dataSha && rm.dataSha !== synced[id];
-    const needPush = id in dirty || (lm && (!rm || !rm.dataSha));
+    const needPull = rm && rm.dataTag && rm.dataTag !== tags[id];
+    const needPush = id in dirty || (lm && (!rm || !rm.dataTag));
     if (needPull || needPush) {
       let localData = (await idbGet('data', id)) || emptyData(id);
       for (let attempt = 0; ; attempt++) {
-        const rf = await getJSON(`library/papers/${id}.json`);
+        const rf = await readJSON(`library/papers/${id}.json`);
         const merged = rf ? mergeData(localData, rf.data) : localData;
         const same = rf && JSON.stringify(merged) === JSON.stringify(rf.data);
         if (rf && JSON.stringify(merged) !== JSON.stringify(localData)) changedLocal = true;
         await idbPut('data', id, merged);
         localData = merged;
-        if (same) { synced[id] = rf.sha; break; }
-        try {
-          synced[id] = await putB64(`library/papers/${id}.json`, utf8B64(JSON.stringify(merged)), rf && rf.sha, `Update notes: ${(meta && meta.title || id).slice(0, 60)}`);
-          break;
-        } catch (e) { if (!e.conflict || attempt >= 2) throw e; }
+        if (same) { tags[id] = rf.etag; break; }
+        try { tags[id] = await writeJSON(`library/papers/${id}.json`, merged, rf && rf.etag); break; }
+        catch (e) { if (!e.conflict || attempt >= 2) throw e; }
       }
       meta = { ...meta, counts: counts(localData) };
     }
     if (!meta) continue;
-    meta = { ...meta, pdfRemote: !!(meta.pdfRemote || (rm && rm.pdfRemote)) };
-    meta.dataSha = synced[id] || meta.dataSha;
-    // 3. the PDF itself
-    if (settings.gh.pdfs && !meta.pdfRemote && !meta.deleted) {
+    meta = { ...meta, pdfRemote: !!(meta.pdfRemote || (rm && rm.pdfRemote)), dataTag: tags[id] || meta.dataTag };
+    if (!meta.pdfRemote && !meta.deleted) {
       const blob = await idbGet('pdfs', id);
-      if (blob && !meta.pdfTooBig) {
-        if (blob.size > 45 * 1024 * 1024) meta.pdfTooBig = true;
-        else {
-          set('syncing', 'Uploading ' + (meta.title || 'PDF').slice(0, 40) + '…');
-          try {
-            await putB64(`library/pdfs/${id}.pdf`, bytesToB64(new Uint8Array(await blob.arrayBuffer())), null, `Add PDF: ${(meta.title || id).slice(0, 60)}`);
-            meta.pdfRemote = true;
-          } catch (e) {
-            if (e.conflict) meta.pdfRemote = true;            // already uploaded from another device
-            else if (e.status === 413 || e.status === 422 || e.status === 400) meta.pdfTooBig = true;
-            else throw e;
-          }
-        }
+      if (blob) {
+        set('syncing', 'Uploading ' + (meta.title || 'PDF').slice(0, 40) + '…');
+        try { await writeBig(`library/pdfs/${id}.pdf`, new Uint8Array(await blob.arrayBuffer()), { createOnly: true, type: 'application/pdf' }); }
+        catch (e) { if (!e.conflict) throw e; }
+        meta.pdfRemote = true;
       }
     }
     await idbPut('papers', id, meta);
     local[id] = meta;
   }
 
-  // 4. write the index if it changed
+  // write the index if anything changed
   for (let attempt = 0; ; attempt++) {
-    const next = {};
-    for (const [id, m] of Object.entries(local)) next[id] = strip(m);
     const merged = { ...rPapers };
-    for (const [id, m] of Object.entries(next)) {
+    for (const [id, m] of Object.entries(local)) {
       const r = merged[id];
       if (!r || (m.updatedAt || 0) >= (r.updatedAt || 0)) merged[id] = { ...m, pdfRemote: !!(m.pdfRemote || (r && r.pdfRemote)) };
-      else merged[id] = { ...r, dataSha: m.dataSha || r.dataSha, pdfRemote: !!(r.pdfRemote || m.pdfRemote) };
+      else merged[id] = { ...r, dataTag: m.dataTag || r.dataTag, pdfRemote: !!(r.pdfRemote || m.pdfRemote) };
     }
     if (remoteIdx && JSON.stringify(merged) === JSON.stringify(rPapers)) break;
-    try {
-      await putB64('library/index.json', utf8B64(JSON.stringify({ version: 1, papers: merged }, null, 0)), idxSha, 'Update library index');
-      break;
-    } catch (e) {
+    try { await writeJSON('library/index.json', { version: 1, papers: merged }, idxTag); break; }
+    catch (e) {
       if (!e.conflict || attempt >= 2) throw e;
-      const again = await getJSON('library/index.json');
-      rPapers = (again && again.data && again.data.papers) || {};
-      idxSha = again && again.sha;
+      const re = await readJSON('library/index.json');
+      rPapers = (re && re.data.papers) || {}; idxTag = re && re.etag;
     }
   }
-  await idbPut('kv', 'synced', synced);
+  await idbPut('kv', 'synced', tags);
   await clearDirty(dirty);
   return changedLocal;
 }
 
 export async function syncNow() {
+  clearTimeout(timer); timer = 0;
   if (!syncOn()) { set('off'); return; }
-  if (!navigator.onLine) { set('offline', 'You’re offline. Changes are saved on this device and will sync later.'); return; }
+  if (!navigator.onLine) { set('offline', 'You’re offline. Changes are saved on this device and will upload when you’re back online.'); return; }
   if (running) { again = true; return; }
   running = true; set('syncing');
   try {
     do {
       again = false;
-      const changed = await syncOnce();
-      if (changed) dispatchEvent(new CustomEvent('pl:pulled'));
+      if (await syncOnce()) dispatchEvent(new CustomEvent('pl:pulled'));
     } while (again);
     set('idle');
   } catch (e) {
     set('error', e.message || String(e));
   } finally { running = false; }
 }
-export function scheduleSync(ms = 2500) {
-  clearTimeout(timer);
+// Writes are batched: the free storage plan allows about 2,000 writes a month.
+let due = 0;
+export function scheduleSync(ms = 45000) {
   if (!syncOn()) { set('off'); return; }
-  timer = setTimeout(syncNow, ms);
+  const t = Date.now() + ms;
+  if (timer && due <= t) return;           // an earlier sync is already planned
+  clearTimeout(timer); due = t;
+  timer = setTimeout(() => { timer = 0; syncNow(); }, ms);
 }
-addEventListener('pl:dirty', () => scheduleSync());
-addEventListener('online', () => scheduleSync(500));
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scheduleSync(800); });
+addEventListener('pl:dirty', e => scheduleSync(e.detail && e.detail.soon ? 3000 : 45000));
+addEventListener('online', () => scheduleSync(1000));
+document.addEventListener('visibilitychange', () => { if (syncOn()) syncNow(); });

@@ -13,11 +13,11 @@ export const DEFAULT_COLORS = [
 
 const DEFAULTS = {
   model: '',                       // "provider:model-id"
-  keys: { anthropic: '', openai: '', openrouter: '' },
+  serverKeys: {},                  // which providers have a key saved on the server
+  prefsAt: 0,                      // when the shared preferences last changed
   models: { anthropic: [], openai: [], openrouter: [] }, // fetched lists [{id,name}]
   pins: { openrouter: [] },        // OpenRouter models shown in the menu
   custom: { anthropic: [], openai: [], openrouter: [] },
-  gh: { token: '', repo: '', branch: '', pdfs: true },
   colors: DEFAULT_COLORS,
   style: '',
   hlColor: 'y',
@@ -41,7 +41,22 @@ function load() {
   return merge(DEFAULTS, raw || {});
 }
 export const settings = load();
+// Preferences shared across devices through the cloud.
+const SHARED = ['model', 'models', 'pins', 'custom', 'colors', 'style'];
+export const sharedPrefs = () => Object.fromEntries(SHARED.map(k => [k, settings[k]]));
+let lastShared = JSON.stringify(sharedPrefs());
 export function saveSettings() {
+  const now = JSON.stringify(sharedPrefs());
+  const sharedChanged = now !== lastShared;
+  if (sharedChanged) { lastShared = now; settings.prefsAt = Date.now(); }
+  try { localStorage.setItem(SKEY, JSON.stringify(settings)); } catch (e) {}
+  dispatchEvent(new CustomEvent('pl:settings'));
+  if (sharedChanged) dispatchEvent(new CustomEvent('pl:dirty', { detail: { soon: true } }));
+}
+export function applySharedPrefs(p) {
+  for (const k of SHARED) if (p[k] !== undefined) settings[k] = merge(DEFAULTS[k], p[k]);
+  settings.prefsAt = p.updatedAt || Date.now();
+  lastShared = JSON.stringify(sharedPrefs());
   try { localStorage.setItem(SKEY, JSON.stringify(settings)); } catch (e) {}
   dispatchEvent(new CustomEvent('pl:settings'));
 }
@@ -60,10 +75,10 @@ export async function listPapers(includeDeleted = false) {
     .sort((a, b) => (b.openedAt || b.addedAt || 0) - (a.openedAt || a.addedAt || 0));
 }
 export const getPaper = id => idbGet('papers', id);
-export async function savePaperMeta(p, dirty = true) {
+export async function savePaperMeta(p, dirty = true, soon = false) {
   if (dirty) p.updatedAt = Date.now();
   await idbPut('papers', p.id, p);
-  if (dirty) await markDirty(p.id);
+  if (dirty) await markDirty(p.id, soon);
 }
 export async function touchOpened(id) {
   const p = await getPaper(id);
@@ -102,11 +117,11 @@ export function mergeData(a, b) {
 export const tombstone = it => ({ id: it.id, deleted: true, createdAt: it.createdAt, updatedAt: Date.now() });
 
 /* ---------- what still needs syncing ---------- */
-export async function markDirty(id) {
+export async function markDirty(id, soon = false) {
   const d = (await idbGet('kv', 'dirty')) || {};
   d[id] = Date.now() + Math.random();
   await idbPut('kv', 'dirty', d);
-  dispatchEvent(new CustomEvent('pl:dirty'));
+  dispatchEvent(new CustomEvent('pl:dirty', { detail: { soon } }));
 }
 export const getDirty = async () => (await idbGet('kv', 'dirty')) || {};
 export async function clearDirty(snapshot) {

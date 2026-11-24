@@ -29,8 +29,8 @@ export async function renderHome() {
   const allH = allHighlights();
   const notes = H.papers.reduce((s, p) => s + H.datas[p.id].threads.filter(t => !t.deleted).length, 0);
   const tips = [];
-  if (!currentModel()) tips.push(`<div class="tip"><b>Add an AI model.</b> Paste a Claude, ChatGPT or OpenRouter API key in Settings so you can ask about what you select. <button type="button" class="btn" data-settings>Open settings</button></div>`);
-  if (!syncOn()) tips.push(`<div class="tip"><b>Use it on every device.</b> Turn on GitHub sync and your papers, highlights and notes follow you to your phone and other computers. <button type="button" class="btn" data-settings>Set up sync</button></div>`);
+  if (!currentModel()) tips.push(`<div class="tip"><b>Add an AI model.</b> Paste a Claude, ChatGPT or OpenRouter API key in Settings once, and it works on every device you sign in on. <button type="button" class="btn" data-settings>Open settings</button></div>`);
+  tips.push(`<div class="tip quiet"><b>Your library lives in the cloud.</b> Open this site on your phone or any computer and sign in with your password to see the same papers, highlights and notes.</div>`);
 
   root.innerHTML = `
   <section class="hero band">
@@ -79,7 +79,7 @@ function paperCard(p) {
     <div class="pc-body">
       <a class="pc-title" href="#/paper/${esc(p.id)}">${esc(p.title)}</a>
       <p class="pc-meta">${p.pages ? p.pages + ' pages · ' : ''}${c.h} highlights · ${c.t} notes</p>
-      <p class="pc-meta">${p.openedAt ? 'Opened ' + timeAgo(p.openedAt) : 'Added ' + timeAgo(p.addedAt)}${syncOn() && !p.pdfRemote ? (p.pdfTooBig ? ' · PDF too large to sync' : ' · PDF only on this device') : ''}</p>
+      <p class="pc-meta">${p.openedAt ? 'Opened ' + timeAgo(p.openedAt) : 'Added ' + timeAgo(p.addedAt)}${!p.pdfRemote ? ' · uploading PDF…' : ''}</p>
       <div class="pc-act"><button type="button" class="mini" data-rename>Rename</button><button type="button" class="mini" data-remove>Remove</button></div>
     </div>
   </article>`;

@@ -1,6 +1,7 @@
-// Talk to Claude, ChatGPT or any OpenRouter model straight from the browser with the user's own key.
+// Ask Claude, ChatGPT or any OpenRouter model. Requests go through /api/ai, which adds your saved key.
 import { settings, saveSettings } from './store.js';
 import { blobToDataURL } from './util.js';
+import { api, apiJSON, errorFrom } from './api.js';
 
 export const PROVIDERS = {
   anthropic: {
@@ -22,6 +23,7 @@ export const PROVIDERS = {
 
 export class AIError extends Error { constructor(msg, code) { super(msg); this.code = code; } }
 
+export const hasKey = p => !!(settings.serverKeys[p] && settings.serverKeys[p].set);
 export const parseModel = v => { const i = (v || '').indexOf(':'); return i < 0 ? { provider: '', id: '' } : { provider: v.slice(0, i), id: v.slice(i + 1) }; };
 
 // Models to show in the menu for one provider.
@@ -36,76 +38,41 @@ export function menuModels(p) {
 }
 export function currentModel() {
   let { provider, id } = parseModel(settings.model);
-  if (provider && settings.keys[provider] && id) return { provider, id };
+  if (provider && hasKey(provider) && id) return { provider, id };
   for (const p of Object.keys(PROVIDERS)) {
-    if (!settings.keys[p]) continue;
+    if (!hasKey(p)) continue;
     const m = menuModels(p)[0];
     if (m) return { provider: p, id: m.id };
   }
   return null;
 }
 
-const OPENAI_SKIP = /(audio|realtime|tts|transcri|whisper|embedding|moderation|image|dall-e|search|instruct|babbage|davinci|computer-use|codex|cyber|sora)/i;
+
+export async function refreshKeys() {
+  const j = await apiJSON('api/config');
+  settings.serverKeys = j.keys; saveSettings();
+  return j.keys;
+}
+export async function saveKey(p, key) {
+  const j = await apiJSON('api/config', { method: 'POST', body: JSON.stringify({ keys: { [p]: key } }) });
+  settings.serverKeys = j.keys; saveSettings();
+  return j.keys;
+}
 
 export async function fetchModels(p) {
-  const key = settings.keys[p];
-  let list = [];
-  try {
-    if (p === 'anthropic') {
-      const r = await fetch('https://api.anthropic.com/v1/models?limit=100', { headers: anthHeaders(key) });
-      if (!r.ok) throw await httpError(r, p);
-      list = (await r.json()).data.map(m => ({ id: m.id, name: m.display_name || m.id }));
-    } else if (p === 'openai') {
-      const r = await fetch('https://api.openai.com/v1/models', { headers: { Authorization: 'Bearer ' + key } });
-      if (!r.ok) throw await httpError(r, p);
-      list = (await r.json()).data.map(m => m.id)
-        .filter(id => /^(gpt-|o\d|chatgpt)/i.test(id) && !OPENAI_SKIP.test(id))
-        .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
-        .map(id => ({ id, name: id }));
-    } else {
-      const r = await fetch('https://openrouter.ai/api/v1/models');
-      if (!r.ok) throw await httpError(r, p);
-      list = (await r.json()).data
-        .filter(m => !m.architecture || !m.architecture.input_modalities || m.architecture.input_modalities.includes('image'))
-        .map(m => ({ id: m.id, name: m.name || m.id }))
-        .sort((a, b) => a.name.localeCompare(b.name));
-    }
-  } catch (e) {
-    if (e instanceof AIError) throw e;
-    throw new AIError(blockedMsg(p), 'network');
-  }
-  settings.models[p] = list;
+  let j;
+  try { j = await apiJSON('api/models?provider=' + p); }
+  catch (e) { throw new AIError(e.message, e.code || 'http'); }
+  settings.models[p] = j.models;
   saveSettings();
-  return list;
+  return j.models;
 }
 
-function anthHeaders(key) {
-  return {
-    'x-api-key': key,
-    'anthropic-version': '2023-06-01',
-    'anthropic-dangerous-direct-browser-access': 'true',
-    'content-type': 'application/json',
-  };
-}
-function blockedMsg(p) {
-  if (p === 'openai') return 'Couldn’t reach OpenAI from the browser. OpenAI sometimes blocks direct web calls; use OpenRouter to get the same ChatGPT models, or try again later.';
-  return `Couldn’t reach ${PROVIDERS[p].name}. Check your connection and try again.`;
-}
-async function httpError(r, p) {
-  let m = '';
-  try { const j = await r.json(); m = (j.error && (j.error.message || j.error)) || j.message || ''; } catch (e) {}
-  if (typeof m !== 'string') m = JSON.stringify(m);
-  if (r.status === 401 || r.status === 403) return new AIError(`${PROVIDERS[p].name} rejected the API key. Check it in Settings.${m ? ' (' + m + ')' : ''}`, 'auth');
-  if (r.status === 404) return new AIError(`That model isn’t available on your ${PROVIDERS[p].name} account. Pick another in the model menu.${m ? ' (' + m + ')' : ''}`, 'model');
-  if (r.status === 429) return new AIError(`${PROVIDERS[p].name} says you’ve hit a rate or spending limit. Wait a bit or check your billing.${m ? ' (' + m + ')' : ''}`, 'rate');
-  if (r.status === 402) return new AIError(`${PROVIDERS[p].name} says your account is out of credit.${m ? ' (' + m + ')' : ''}`, 'credit');
-  return new AIError(`${PROVIDERS[p].name} error ${r.status}${m ? ': ' + m : ''}`, 'http');
-}
-
-async function* sse(res, signal) {
+async function* sse(res) {
   const rd = res.body.getReader();
   const dec = new TextDecoder();
   let buf = '';
+  const take = chunk => chunk.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n');
   try {
     for (;;) {
       const { value, done } = await rd.read();
@@ -113,16 +80,21 @@ async function* sse(res, signal) {
       buf += dec.decode(value, { stream: true }).replace(/\r\n/g, '\n');
       let i;
       while ((i = buf.indexOf('\n\n')) >= 0) {
-        const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
-        const data = chunk.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n');
+        const data = take(buf.slice(0, i)); buf = buf.slice(i + 2);
         if (data) yield data;
       }
     }
-    if (buf.trim()) {
-      const data = buf.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n');
-      if (data) yield data;
-    }
+    if (buf.trim()) { const data = take(buf); if (data) yield data; }
   } finally { try { rd.releaseLock(); } catch (e) {} }
+}
+
+function friendly(status, msg, provider) {
+  const n = PROVIDERS[provider] ? PROVIDERS[provider].name : provider;
+  if (status === 401 || status === 403) return new AIError(`${n} rejected the saved API key. Replace it in Settings.${msg ? ' (' + msg + ')' : ''}`, 'auth');
+  if (status === 404) return new AIError(`That model isn’t available on your ${n} account. Pick another in the model menu.${msg ? ' (' + msg + ')' : ''}`, 'model');
+  if (status === 429) return new AIError(`${n} says you’ve hit a rate or spending limit. Wait a bit or check your billing.${msg ? ' (' + msg + ')' : ''}`, 'rate');
+  if (status === 402) return new AIError(`${n} says your account is out of credit.${msg ? ' (' + msg + ')' : ''}`, 'credit');
+  return new AIError(msg || `${n} error ${status}`, 'http');
 }
 
 /**
@@ -132,46 +104,26 @@ async function* sse(res, signal) {
  */
 export async function chat({ system, turns, image, onText, signal, model }) {
   const m = model || currentModel();
-  if (!m) throw new AIError('Pick a model and add an API key in Settings first.', 'setup');
-  const key = settings.keys[m.provider];
-  if (!key) throw new AIError(`Add your ${PROVIDERS[m.provider].name} API key in Settings.`, 'setup');
-  const imgURL = image ? await blobToDataURL(image) : null;
+  if (!m) throw new AIError('Pick a model and save an API key in Settings first.', 'setup');
+  if (!hasKey(m.provider)) throw new AIError(`Save your ${PROVIDERS[m.provider].name} API key in Settings.`, 'setup');
+  const img = image ? await blobToDataURL(image) : null;
   let text = '', truncated = false, res;
-
   try {
-    if (m.provider === 'anthropic') {
-      const messages = turns.map((t, i) => {
-        if (i === turns.length - 1 && t.role === 'user' && imgURL) {
-          const [, mime, data] = imgURL.match(/^data:([^;]+);base64,(.*)$/);
-          return { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: mime, data } }, { type: 'text', text: t.content }] };
-        }
-        return { role: t.role, content: t.content };
-      });
-      res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST', signal, headers: anthHeaders(key),
-        body: JSON.stringify({ model: m.id, max_tokens: 4096, system, messages, stream: true }),
-      });
-    } else {
-      const messages = [{ role: 'system', content: system }, ...turns.map((t, i) => {
-        if (i === turns.length - 1 && t.role === 'user' && imgURL)
-          return { role: 'user', content: [{ type: 'text', text: t.content }, { type: 'image_url', image_url: { url: imgURL } }] };
-        return { role: t.role, content: t.content };
-      })];
-      const url = m.provider === 'openai' ? 'https://api.openai.com/v1/chat/completions' : 'https://openrouter.ai/api/v1/chat/completions';
-      const headers = { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' };
-      if (m.provider === 'openrouter') { headers['HTTP-Referer'] = location.origin; headers['X-Title'] = 'Paper Lens'; }
-      const body = { model: m.id, messages, stream: true };
-      if (m.provider === 'openai') body.max_completion_tokens = 8000; else body.max_tokens = 4096;
-      res = await fetch(url, { method: 'POST', signal, headers, body: JSON.stringify(body) });
-    }
+    res = await api('api/ai', {
+      method: 'POST', signal, headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: m.provider, model: m.id, system, turns: turns.map(t => ({ role: t.role, content: t.content })), image: img }),
+    });
   } catch (e) {
     if (e.name === 'AbortError') throw new AIError('Stopped.', 'cancelled');
-    throw new AIError(blockedMsg(m.provider), 'network');
+    throw new AIError(e.message, e.code || 'network');
   }
-  if (!res.ok) throw await httpError(res, m.provider);
-
+  if (!res.ok) {
+    const er = await errorFrom(res);
+    if (er.code === 'setup') throw new AIError(er.message, 'setup');
+    throw friendly(res.status === 424 ? 401 : res.status, er.message, m.provider);
+  }
   try {
-    for await (const data of sse(res, signal)) {
+    for await (const data of sse(res)) {
       if (data === '[DONE]') break;
       let j; try { j = JSON.parse(data); } catch (e) { continue; }
       if (j.error) throw new AIError(`${PROVIDERS[m.provider].name}: ${j.error.message || JSON.stringify(j.error)}`, 'http');

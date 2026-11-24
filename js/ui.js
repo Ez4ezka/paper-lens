@@ -1,6 +1,6 @@
 // Shared UI bits: model menu, sync status pill, highlight cards, small dialogs.
 import { settings, saveSettings, colorOf } from './store.js';
-import { PROVIDERS, menuModels, currentModel } from './ai.js';
+import { PROVIDERS, menuModels, currentModel, hasKey } from './ai.js';
 import { syncState, syncOn } from './sync.js';
 import { $, esc, timeAgo } from './util.js';
 
@@ -10,7 +10,7 @@ export function renderModelSelect() {
 }
 function fillModelSelect(sel) {
   const cur = currentModel();
-  const groups = Object.keys(PROVIDERS).filter(p => settings.keys[p]);
+  const groups = Object.keys(PROVIDERS).filter(hasKey);
   if (!groups.length) {
     sel.innerHTML = '<option value="">Choose an AI model…</option>';
     sel.classList.add('warn');
@@ -23,16 +23,15 @@ function fillModelSelect(sel) {
     return `<optgroup label="${esc(PROVIDERS[p].name)}">` + ms.map(m => `<option value="${esc(p + ':' + m.id)}">${esc(m.name)}</option>`).join('') + '</optgroup>';
   }).join('') + '<option value="__settings">Manage models…</option>';
   if (cur) sel.value = cur.provider + ':' + cur.id;
-  if (cur && settings.model !== cur.provider + ':' + cur.id) { settings.model = cur.provider + ':' + cur.id; saveSettings(); }
 }
 
 export function renderSyncPill() {
   const b = $('#syncPill');
   const s = syncOn() ? syncState.status : 'off';
   const map = {
-    off: ['Sync off', 'Your library is only on this device. Turn on sync in Settings to use it everywhere.'],
-    idle: ['Synced', 'Saved to your GitHub library' + (syncState.at ? ' · ' + timeAgo(syncState.at) : '')],
-    syncing: ['Syncing…', syncState.msg || 'Saving to GitHub'],
+    off: ['Signed out', 'Sign in to use your cloud library.'],
+    idle: ['Saved', 'Saved to your cloud library' + (syncState.at ? ' · ' + timeAgo(syncState.at) : '') + '. Click to sync now.'],
+    syncing: ['Syncing…', syncState.msg || 'Saving to your cloud library'],
     error: ['Sync problem', syncState.msg],
     offline: ['Offline', syncState.msg],
   };

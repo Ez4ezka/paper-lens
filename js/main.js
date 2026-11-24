@@ -1,6 +1,8 @@
 // App shell: routing between home and reader, opening PDFs, model menu, sync status.
 import { settings, saveSettings, getPaper, savePaperMeta, putPdf } from './store.js';
 import { syncNow, syncOn } from './sync.js';
+import { getToken, login } from './api.js';
+import { refreshKeys } from './ai.js';
 import { initReader, openReader, leaveReader } from './reader.js';
 import { initHome, renderHome } from './home.js';
 import { initSettings, openSettings } from './settings.js';
@@ -24,7 +26,7 @@ const onModel = e => {
 };
 $('#modelSel').addEventListener('change', onModel);
 $('#modelSel2').addEventListener('change', onModel);
-$('#syncPill').addEventListener('click', () => { if (syncOn()) syncNow(); else openSettings({ section: 's-sync' }); });
+$('#syncPill').addEventListener('click', () => { if (syncOn()) syncNow(); else showGate(); });
 addEventListener('pl:sync', renderSyncPill);
 addEventListener('pl:settings', renderModelSelect);
 addEventListener('pl:pulled', () => { if (!$('#home').hidden) renderHome(); });
@@ -89,7 +91,7 @@ async function addPdfFile(file) {
       counts: (meta && meta.counts) || { h: 0, t: 0 }, thumb, pdfRemote: !!(meta && meta.pdfRemote),
     };
     doc.destroy();
-    await savePaperMeta(meta);
+    await savePaperMeta(meta, true, true);
   }
   location.hash = '#/paper/' + id;
 }
@@ -98,11 +100,6 @@ async function addPdfFile(file) {
 async function route() {
   const h = location.hash || '#/';
   let m;
-  if ((m = h.match(/^#\/setup\/(.+)$/))) {
-    show('home'); await renderHome();
-    openSettings({ section: 's-move', setupCode: decodeURIComponent(m[1]) });
-    return;
-  }
   if ((m = h.match(/^#\/paper\/([\w-]+)(?:\/([ht])\/([\w-]+))?$/))) {
     show('reader');
     const focus = m[2] === 'h' ? { h: m[3] } : m[2] === 't' ? { t: m[3] } : null;
@@ -121,6 +118,26 @@ function show(which) {
   document.body.dataset.view = which;
   if (home) { $('#fname').textContent = ''; document.title = 'Paper Lens'; }
 }
-addEventListener('hashchange', route);
-route();
-if (syncOn()) syncNow();
+/* ---------- sign-in ---------- */
+function showGate(msg) {
+  const g = $('#gate'); g.hidden = false;
+  $('#gateMsg').textContent = msg || '';
+  setTimeout(() => $('#gatePw').focus(), 50);
+}
+$('#gateForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const b = $('#gateBtn'); b.disabled = true; $('#gateMsg').textContent = '';
+  try { await login($('#gatePw').value); $('#gatePw').value = ''; $('#gate').hidden = true; start(); }
+  catch (err) { $('#gateMsg').textContent = err.message; }
+  b.disabled = false;
+});
+addEventListener('pl:signed-out', () => showGate('Please sign in again.'));
+
+let started = false;
+function start() {
+  if (!started) { started = true; addEventListener('hashchange', route); }
+  route();
+  refreshKeys().then(renderModelSelect).catch(() => {});
+  syncNow();
+}
+if (getToken()) start(); else showGate();
