@@ -1,5 +1,6 @@
 // The paper reader: PDF pages, Ask + Highlight tools, notes panel, per-paper highlight list.
-import { settings, saveSettings, colorOf, getPaper, getData, saveData, getPdf, putPdf, touchOpened, mergeData, tombstone } from './store.js';
+import { settings, saveSettings, colorOf, getPaper, getData, saveData, getPdf, putPdf, touchOpened, mergeData, tombstone, listPapers } from './store.js';
+import { EXPLAIN, tagQuestions, needsTopic, threadTitle, firstAnswer } from './topics.js';
 import { syncOn, downloadPdf } from './sync.js';
 import { chat, currentModel, PROVIDERS } from './ai.js';
 import { md, typeset } from './md.js';
@@ -7,7 +8,6 @@ import { $, $$, esc, uid, toast, inPoly, canvasToBlob, canvasThumb, copyText, sh
 import { swatchesHTML, hlCardHTML, renderModelSelect } from './ui.js';
 
 const NS = 'http://www.w3.org/2000/svg';
-const EXPLAIN = 'Explain what I selected.';
 const R = {
   paper: null, data: null, doc: null, pages: [], scale: 1.25, fitMode: true,
   active: null, live: new Set(), views: new Map(), imgCache: new Map(),
@@ -619,6 +619,7 @@ async function ask(t, question, { show = true } = {}) {
     typeset(el);
     if (r.truncated) el.insertAdjacentHTML('beforeend', '<div class="note">The answer hit the length limit. Ask “continue” for the rest.</div>');
     await persist();
+    autoTag(t.id);
   } catch (e) {
     cancelAnimationFrame(raf);
     const part = e.partial ? md(e.partial) : '';
@@ -636,15 +637,49 @@ async function ask(t, question, { show = true } = {}) {
     if (!R.live.size && R.refreshLater) refreshFromStore();
   }
 }
+// Give a newly answered question a topic in the background, so it is already sorted on the home page.
+const tagging = new Set();
+async function autoTag(id) {
+  const pid = R.paper && R.paper.id;
+  const t = R.data && R.data.threads.find(x => x.id === id);
+  if (!pid || !t || !needsTopic(t) || tagging.has(id)) return;
+  tagging.add(id);
+  try {
+    const existing = new Set();
+    for (const p of await listPapers()) for (const x of (await getData(p.id)).threads) if (x.topic && !x.deleted) existing.add(x.topic);
+    const r = await tagQuestions([{ key: id, paper: R.paper.title, question: threadTitle(t), sel: t.sel, answer: firstAnswer(t) }], [...existing]);
+    const topic = r[id];
+    if (!topic) return;
+    if (R.paper && R.paper.id === pid) {
+      const cur = R.data.threads.find(x => x.id === id);
+      if (!cur || cur.deleted || cur.topic) return;
+      cur.topic = topic; cur.updatedAt = Date.now();
+      const v = R.views.get(id); if (v) { const s = v.card.querySelector('.topic'); s.textContent = topic; s.hidden = false; }
+      await persist();
+    } else {
+      const d = await getData(pid); const cur = d.threads.find(x => x.id === id);
+      if (cur && !cur.deleted && !cur.topic) { cur.topic = topic; cur.updatedAt = Date.now(); await saveData(d); }
+    }
+  } catch (e) { /* not important enough to interrupt reading; "Sort with AI" on the home page catches up */ }
+  finally { tagging.delete(id); }
+}
 const modelTag = id => id ? `<div class="mtag">${esc(id.split(':').slice(1).join(':'))}</div>` : '';
 
 function makeCard(t) {
   const a = document.createElement('article'); a.className = 'card'; a.dataset.id = t.id;
   a.innerHTML = `<div class="ch"><span class="num">${t.n}</span><span class="meta">${t.sh ? `Page ${t.page} · ${t.sh.type === 'box' ? 'box' : 'freehand'} selection` : 'Question about the paper'}</span>
+    <span class="topic" ${t.topic ? '' : 'hidden'}>${esc(t.topic || '')}</span>
+    <button class="ghost star" type="button" aria-pressed="${!!t.starred}" title="Save for later" aria-label="Save note ${t.n} for later">${t.starred ? '★' : '☆'}</button>
     ${t.sh ? '<button class="ghost hlit" type="button" title="Save this selection as a highlight">Highlight</button>' : ''}<button class="ghost del" type="button" aria-label="Delete note ${t.n}">✕</button></div>` +
     (t.sh ? `<button class="thumb" type="button" title="Show on the page"><img alt="Your selection from page ${t.page}" ${t.thumb ? `src="${t.thumb}"` : ''}></button>` : '') + '<div class="msgs"></div>';
   a.querySelector('.ch').addEventListener('click', e => { if (!e.target.closest('button')) activate(t); });
   a.querySelector('.del').onclick = () => removeThread(t);
+  a.querySelector('.star').onclick = () => {
+    t.starred = !t.starred; t.updatedAt = Date.now();
+    const b = a.querySelector('.star'); b.textContent = t.starred ? '★' : '☆'; b.setAttribute('aria-pressed', t.starred);
+    toast(t.starred ? 'Saved for later. Find it under Questions on the home page.' : 'Removed from saved.');
+    persist();
+  };
   const hb = a.querySelector('.hlit');
   if (hb) hb.onclick = () => { const p = R.pages[t.page - 1]; if (p) { createHighlight(p, t.sh); } };
   const th = a.querySelector('.thumb');

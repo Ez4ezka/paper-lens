@@ -5,6 +5,7 @@ Read research papers with AI. Open any PDF, then:
 - **Ask**: draw a box or a freehand shape around anything (a word, an equation, a figure, a paragraph), type your question and press Enter. The answer appears on the right, and follow-ups stack under it.
 - **Highlight**: pick the highlighter and one of five colors, then drag over text, formulas or figures. Click a highlight to add a note, change its color, or ask AI about it.
 - **Home page**: every paper you've read, plus every highlight from every paper in one place. Filter by color, search, group by paper or color, and export to Markdown.
+- **Questions**: every question you've asked, from every paper, on the home page. Each one gets a short topic from AI after its first answer (using a small, cheap model from the same provider when one is in your menu), so related questions from different papers sit together. Star (☆) questions to save them for later, filter by topic, paper or saved, search the questions and answers, click a topic to change it, and export to Markdown. *Sort with AI* tags any older questions that don't have a topic yet.
 
 It works with **Claude** (Anthropic API), **ChatGPT** (OpenAI API) or **any model on OpenRouter**. You can switch models from the menu at the top of the page at any time, and your library is saved to the cloud so it's the same on every device.
 
