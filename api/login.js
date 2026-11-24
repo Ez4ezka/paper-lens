@@ -4,7 +4,7 @@ import { json, configured, safeEqual, sessionToken } from './_lib.js';
 export default {
   async fetch(req) {
     if (req.method !== 'POST') return json({ error: 'Use POST.' }, 405);
-    if (!configured()) return json({ error: 'The server is missing APP_PASSWORD or SESSION_SECRET.' }, 500);
+    if (!configured()) return json({ error: 'Paper Lens isn’t set up yet: add an APP_PASSWORD environment variable in Vercel, then redeploy.' }, 500);
     let body = {};
     try { body = await req.json(); } catch (e) {}
     if (typeof body.password !== 'string' || !safeEqual(body.password, process.env.APP_PASSWORD)) {

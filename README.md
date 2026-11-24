@@ -35,7 +35,7 @@ Paper Lens runs on **Vercel**: a static front end plus a few small server functi
 
 1. Import this repository into Vercel (no build step, no framework).
 2. Create a **private** Blob store and connect it to the project.
-3. Add environment variables `APP_PASSWORD` (your sign-in password) and `SESSION_SECRET` (any long random string; change it to sign out every device).
+3. Add an environment variable `APP_PASSWORD` (your sign-in password). Optionally add `SESSION_SECRET` (a long random string). Changing either one signs out every device.
 
 ## Keyboard shortcuts (in a paper)
 
@@ -53,7 +53,7 @@ Paper Lens runs on **Vercel**: a static front end plus a few small server functi
 ## Privacy and security notes
 
 - Everything is stored in a private Blob store that only the server functions can read, and only after sign-in.
-- Choose a strong password. Changing `SESSION_SECRET` signs out every device.
+- Choose a strong password. Changing `APP_PASSWORD` (or `SESSION_SECRET`) signs out every device.
 
 ## Credits
 

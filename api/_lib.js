@@ -7,9 +7,12 @@ export const json = (obj, status = 200, headers = {}) =>
   new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers } });
 
 /* ---------- sign-in ---------- */
-export function configured() { return !!(process.env.APP_PASSWORD && process.env.SESSION_SECRET); }
+// SESSION_SECRET is optional: without it the token is derived from the password,
+// so changing APP_PASSWORD signs every device out.
+export function configured() { return !!process.env.APP_PASSWORD; }
+function secret() { return process.env.SESSION_SECRET || 'pl-derived:' + process.env.APP_PASSWORD; }
 export function sessionToken() {
-  return crypto.createHmac('sha256', process.env.SESSION_SECRET || '').update('paperlens-session-v1').digest('base64url');
+  return crypto.createHmac('sha256', secret()).update('paperlens-session-v1').digest('base64url');
 }
 export function safeEqual(a, b) {
   const x = Buffer.from(String(a)), y = Buffer.from(String(b));
