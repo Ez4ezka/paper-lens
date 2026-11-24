@@ -12,7 +12,7 @@ let dlg, orQuery = '';
 export function initSettings() {
   dlg = $('#settings');
   $('#settingsBtn').onclick = () => openSettings();
-  addEventListener('pl:open-settings', e => openSettings(e.detail));
+  addEventListener('pl:open-settings', e => openSettings(e.detail || {}));
   dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
   addEventListener('pl:sync', () => { const s = dlg.querySelector('#cloudStatus'); if (s && dlg.open) s.innerHTML = cloudStatusHTML(); });
 }
