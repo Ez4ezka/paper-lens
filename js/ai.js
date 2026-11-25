@@ -26,14 +26,31 @@ export class AIError extends Error { constructor(msg, code) { super(msg); this.c
 export const hasKey = p => !!(settings.serverKeys[p] && settings.serverKeys[p].set);
 export const parseModel = v => { const i = (v || '').indexOf(':'); return i < 0 ? { provider: '', id: '' } : { provider: v.slice(0, i), id: v.slice(i + 1) }; };
 
+// Model family, so the menu can show only the newest model of each one.
+// claude-opus-5-5 -> claude-opus, gpt-6.2-sol-2026-10-01 -> gpt-#-sol
+const family = (p, id) => p === 'anthropic' ? (id.match(/^claude-[a-z]+/) || [id])[0]
+  : id.replace(/-\d{4}-?\d{2}-?\d{2}$/, '').replace(/\d+(\.\d+)*/g, '#');
+
+// The default menu: the newest model of each family (the lists come newest first).
+export function defaultPicks(p) {
+  const fetched = settings.models[p] || [];
+  if (p === 'openrouter') return [];
+  if (!fetched.length) return [...PROVIDERS[p].starter];
+  const seen = new Set(), out = [];
+  for (const m of fetched) { const f = family(p, m.id); if (!seen.has(f)) { seen.add(f); out.push(m.id); } }
+  return out;
+}
+// Models ticked for the menu: your own picks, or the newest of each family.
+export const menuPicks = p => (settings.pins[p] && settings.pins[p].length ? settings.pins[p] : defaultPicks(p));
+
 // Models to show in the menu for one provider.
 export function menuModels(p) {
   const fetched = settings.models[p] || [];
   const name = id => (fetched.find(m => m.id === id) || {}).name || id;
-  let ids;
-  if (p === 'openrouter') ids = [...settings.pins.openrouter];
-  else ids = fetched.length ? fetched.map(m => m.id) : [...PROVIDERS[p].starter];
+  const ids = [...menuPicks(p)];
   for (const c of settings.custom[p] || []) if (!ids.includes(c)) ids.push(c);
+  const cur = parseModel(settings.model);   // keep the model you're using, even if it isn't ticked
+  if (cur.provider === p && cur.id && !ids.includes(cur.id)) ids.push(cur.id);
   return ids.map(id => ({ id, name: name(id) }));
 }
 export function currentModel() {

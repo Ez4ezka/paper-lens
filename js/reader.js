@@ -360,15 +360,21 @@ async function pageText(p) {
 async function textIn(p, sh) {
   const items = await pageText(p);
   const [x0, y0, x1, y1] = sh.bb;
-  const got = items.filter(it => {
-    if (!it.s.trim()) return false;
-    const ix = Math.max(0, Math.min(x1, it.x + it.w) - Math.max(x0, it.x)), iy = Math.max(0, Math.min(y1, it.y + it.h) - Math.max(y0, it.y));
-    if (ix * iy < .35 * Math.max(1, it.w * it.h) && !(ix > 0 && iy > .5 * it.h && ix > 8)) return false;
-    if (sh.type === 'box') return true;
-    const cy = it.y + it.h / 2, cx = Math.max(x0, Math.min(x1, it.x + it.w / 2));
-    return inPoly(cx, cy, sh.pts) || inPoly(Math.max(it.x, x0) + 2, cy, sh.pts) || inPoly(Math.min(it.x + it.w, x1) - 2, cy, sh.pts);
-  });
-  return got.map(it => it.s).join(' ').replace(/\s+/g, ' ').trim().slice(0, 4000);
+  const inside = (x, y) => sh.type === 'box' ? x >= x0 && x <= x1 && y >= y0 && y <= y1 : inPoly(x, y, sh.pts);
+  const out = [];
+  for (const it of items) {
+    if (!it.s.trim()) continue;
+    // the line must sit mostly inside the selection vertically
+    const iy = Math.min(y1, it.y + it.h) - Math.max(y0, it.y);
+    if (iy < .45 * it.h || it.x > x1 || it.x + it.w < x0) continue;
+    // PDF text comes in whole lines, so keep only the words whose middle is inside the selection
+    const cw = it.w / Math.max(1, it.s.length), cy = it.y + it.h / 2;
+    for (const m of it.s.matchAll(/\S+/g)) {
+      const cx = it.x + (m.index + m[0].length / 2) * cw;
+      if (inside(cx, cy)) out.push(m[0]);
+    }
+  }
+  return out.join(' ').replace(/\s+/g, ' ').trim().slice(0, 4000);
 }
 async function paperText() {
   let s = '';
@@ -378,7 +384,7 @@ async function paperText() {
 
 /* ================= picture of a selection ================= */
 async function crop(p, sh, { mask = true, outline = true, maxSide = 1500 } = {}) {
-  const pad = 6;
+  const pad = sh.type === 'box' ? 0 : 6;   // a box is cut exactly; a freehand shape keeps a faded margin for context
   const x0 = Math.max(0, sh.bb[0] - pad), y0 = Math.max(0, sh.bb[1] - pad), x1 = Math.min(p.w, sh.bb[2] + pad), y1 = Math.min(p.h, sh.bb[3] + pad);
   const bw = x1 - x0, bh = y1 - y0;
   let rs = Math.min(6, Math.max(2, maxSide / Math.max(bw, bh)));
@@ -752,6 +758,7 @@ function systemFor(t) {
 How to answer:
 ${style}
 - Write math in LaTeX: $...$ inline, $$...$$ on its own line.
+- Answer about what is inside the selection. The page text below is only background, so don't explain parts of the page they didn't select unless it's needed to make sense of the selection.
 - If the selection is unclear or cut off, say what you can see and make your best reading.
 
 Paper title: ${R.paper.title}`;
@@ -759,7 +766,7 @@ Paper title: ${R.paper.title}`;
   const p = R.pages[t.page - 1], prev = R.pages[t.page - 2], first = R.pages[0];
   return head + `\n\nOpening of the paper, for context:\n"""\n${(first && first.text || '').slice(0, 3500)}\n"""` +
     (prev && prev.text && t.page > 2 ? `\n\nEnd of page ${t.page - 1}, for context:\n"""\n${prev.text.slice(-2500)}\n"""` : '') +
-    `\n\nText of page ${t.page}, where the selection is:\n"""\n${(p && p.text || '').slice(0, 7000)}\n"""\n\nTHE SELECTION (page ${t.page}): the attached image shows exactly what they selected${t.sh.type === 'lasso' ? '; the region inside the orange outline is the selection, the faded area around it is only nearby context' : ''}. Text the PDF reports inside the selection (may be empty or garbled for math, figures and images): """${t.sel || '(none)'}"""`;
+    `\n\nText of page ${t.page}, where the selection is:\n"""\n${(p && p.text || '').slice(0, 7000)}\n"""\n\nTHE SELECTION (page ${t.page}): the attached image shows exactly what they selected${t.sh.type === 'lasso' ? '; the region inside the blue outline is the selection, the faded area around it is only nearby context' : ''}. Text the PDF reports inside the selection (may be empty or garbled for math, figures and images): """${t.sel || '(none)'}"""`;
 }
 
 async function ask(t, question, { show = true } = {}) {

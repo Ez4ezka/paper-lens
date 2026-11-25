@@ -16,7 +16,7 @@ const DEFAULTS = {
   serverKeys: {},                  // which providers have a key saved on the server
   prefsAt: 0,                      // when the shared preferences last changed
   models: { anthropic: [], openai: [], openrouter: [] }, // fetched lists [{id,name}]
-  pins: { openrouter: [] },        // OpenRouter models shown in the menu
+  pins: { anthropic: [], openai: [], openrouter: [] }, // models ticked for the menu (empty = newest of each family)
   custom: { anthropic: [], openai: [], openrouter: [] },
   colors: DEFAULT_COLORS,
   style: '',

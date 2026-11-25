@@ -1,13 +1,13 @@
 // Settings dialog: AI keys (saved on the server) + models, highlight colors, account.
 import { settings, saveSettings, DEFAULT_COLORS } from './store.js';
-import { PROVIDERS, fetchModels, menuModels, saveKey, refreshKeys, hasKey } from './ai.js';
+import { PROVIDERS, fetchModels, menuModels, menuPicks, saveKey, refreshKeys, hasKey } from './ai.js';
 import { syncNow, syncState } from './sync.js';
 import { DEFAULT_STYLE } from './reader.js';
 import { setToken } from './api.js';
 import { $, $$, esc, toast, idbClear, timeAgo } from './util.js';
 import { renderModelSelect, confirmBox } from './ui.js';
 
-let dlg, orQuery = '';
+let dlg; const pickQ = {};
 
 export function initSettings() {
   dlg = $('#settings');
@@ -45,8 +45,8 @@ function provHTML(p) {
       <button type="button" class="btn pri" data-save>Save</button>
       ${k.set ? '<button type="button" class="btn" data-remove>Remove</button>' : ''}
     </div>
-    <div class="pstatus">${k.set ? `<span class="ok">Key saved ${esc(k.hint)}</span> · ` : ''}${n ? `${n} models found` : ''}${k.set || p === 'openrouter' ? ` <button type="button" class="linkbtn" data-load>${n ? 'Refresh model list' : 'Load model list'}</button>` : ''}${k.set && p !== 'openrouter' && inMenu.length ? '<br>In the menu: ' + esc(inMenu.slice(0, 4).map(m => m.name).join(', ')) + (inMenu.length > 4 ? '…' : '') : ''}</div>
-    ${p === 'openrouter' ? `<div class="orpick"><input class="inp" type="search" data-orq placeholder="${n ? 'Search ' + n + ' models (gpt, claude, gemini…) and tick the ones for your menu' : 'Load the model list to choose which ones appear in your menu'}" value="${esc(orQuery)}"><div class="orlist" data-orlist></div></div>` : ''}
+    <div class="pstatus">${k.set ? `<span class="ok">Key saved ${esc(k.hint)}</span> · ` : ''}${n ? `${n} models found` : ''}${k.set || p === 'openrouter' ? ` <button type="button" class="linkbtn" data-load>${n ? 'Refresh model list' : 'Load model list'}</button>` : ''}${k.set && p !== 'openrouter' && inMenu.length && !n ? '<br>In the menu: ' + esc(inMenu.slice(0, 4).map(m => m.name).join(', ')) + (inMenu.length > 4 ? '…' : '') : ''}</div>
+    ${p === 'openrouter' || n ? `<div class="orpick">${p === 'anthropic' && n ? `<p class="muted small">Tick the models for your menu. Untick everything to go back to the newest of each kind.</p>` : `<input class="inp" type="search" data-orq placeholder="${n ? 'Search ' + n + ' models' + (p === 'openrouter' ? ' (gpt, claude, gemini…)' : '') + ' and tick the ones for your menu' : 'Load the model list to choose which ones appear in your menu'}" value="${esc(pickQ[p] || '')}">`}<div class="orlist" data-orlist></div></div>` : ''}
     <details class="custom"><summary>Add a model by its exact ID</summary>
       <div class="row"><input class="inp grow" data-cid placeholder="${p === 'openrouter' ? 'e.g. openai/gpt-6.2-sol' : p === 'openai' ? 'e.g. gpt-6.2-sol' : 'e.g. claude-sonnet-5-5'}"><button type="button" class="btn" data-cadd>Add</button></div>
       <div class="cl">${(settings.custom[p] || []).map(id => `<span class="chip">${esc(id)}<button type="button" data-cdel="${esc(id)}" aria-label="Remove ${esc(id)}">✕</button></span>`).join('')}</div>
@@ -54,16 +54,17 @@ function provHTML(p) {
   </div>`;
 }
 
-function orListHTML() {
-  const list = settings.models.openrouter || [];
+function pickListHTML(p) {
+  const list = settings.models[p] || [];
   if (!list.length) return '';
-  const q = orQuery.trim().toLowerCase();
-  const pins = new Set(settings.pins.openrouter);
+  const all = p === 'anthropic';   // short list: show it whole
+  const q = all ? '' : (pickQ[p] || '').trim().toLowerCase();
+  const pins = new Set(menuPicks(p));
   const rows = list.filter(m => pins.has(m.id) || !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
     .sort((a, b) => (pins.has(b.id) - pins.has(a.id)))
-    .slice(0, q ? 80 : 30);
+    .slice(0, all ? 200 : q ? 80 : 30);
   return rows.map(m => `<label class="orrow"><input type="checkbox" data-pin="${esc(m.id)}" ${pins.has(m.id) ? 'checked' : ''}><span>${esc(m.name)}</span><code>${esc(m.id)}</code></label>`).join('') +
-    (!q ? '<p class="muted small">Search to see more models.</p>' : '');
+    (!all && !q && rows.length < list.length ? '<p class="muted small">Search to see more models.</p>' : '');
 }
 
 function render() {
@@ -96,7 +97,7 @@ function render() {
   </section>
   </div></div>`;
   bind();
-  const orl = dlg.querySelector('[data-orlist]'); if (orl) orl.innerHTML = orListHTML();
+  $$('.prov', dlg).forEach(b => { const l = b.querySelector('[data-orlist]'); if (l) l.innerHTML = pickListHTML(b.dataset.p); });
 }
 
 function bind() {
@@ -131,13 +132,14 @@ function bind() {
       catch (e) { st().innerHTML = `<span class="err">${esc(e.message)}</span>`; }
     };
     const orq = box.querySelector('[data-orq]');
-    if (orq) orq.addEventListener('input', () => { orQuery = orq.value; box.querySelector('[data-orlist]').innerHTML = orListHTML(); });
+    if (orq) orq.addEventListener('input', () => { pickQ[p] = orq.value; box.querySelector('[data-orlist]').innerHTML = pickListHTML(p); });
     const orl = box.querySelector('[data-orlist]');
     if (orl) orl.addEventListener('change', e => {
       const id = e.target.dataset.pin; if (!id) return;
-      const s = new Set(settings.pins.openrouter);
-      e.target.checked ? s.add(id) : s.delete(id);
-      settings.pins.openrouter = [...s]; saveSettings(); renderModelSelect();
+      const s = new Set(menuPicks(p));
+      if (e.target.checked) s.add(id); else s.delete(id);
+      settings.pins = { ...settings.pins, [p]: [...s] }; saveSettings(); renderModelSelect();
+      if (!s.size && p !== 'openrouter') { orl.innerHTML = pickListHTML(p); toast('Back to the newest model of each kind.'); }
     });
     box.querySelector('[data-cadd]').onclick = () => {
       const inp = box.querySelector('[data-cid]'); const id = inp.value.trim(); if (!id) return;
