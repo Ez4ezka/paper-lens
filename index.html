@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Paper Lens</title>
 <meta name="description" content="Read research papers with AI: highlight text and formulas in colors, draw around anything and ask Claude or ChatGPT about it.">
-<meta name="theme-color" content="#17181d">
+<meta name="theme-color" content="#0c0e13">
+<script>try{var t=localStorage.getItem('paperlens.theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -23,7 +24,7 @@ window.MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath:
 <body data-view="home">
 <header class="bar">
   <a class="brand" href="#/" aria-label="Paper Lens home">
-    <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><rect x="3" y="2" width="16" height="21" rx="2" fill="#fff" stroke="#bbb"/><rect x="6" y="8" width="10" height="5" rx="1" fill="#ffd60a"/><path d="M6 16h9M6 19h7M6 5h10" stroke="#9a9a9a" stroke-width="1.4"/><circle cx="18" cy="17" r="4.5" fill="none" stroke="#e8a800" stroke-width="2"/><path d="M21.2 20.2 24 23" stroke="#e8a800" stroke-width="2.4" stroke-linecap="round"/></svg>
+    <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><rect x="3" y="2" width="16" height="21" rx="2" fill="#fff" stroke="#bbb"/><rect x="6" y="8" width="10" height="5" rx="1" fill="#1fb8ff"/><path d="M6 16h9M6 19h7M6 5h10" stroke="#9a9a9a" stroke-width="1.4"/><circle cx="18" cy="17" r="4.5" fill="none" stroke="#1f6bff" stroke-width="2"/><path d="M21.2 20.2 24 23" stroke="#1f6bff" stroke-width="2.4" stroke-linecap="round"/></svg>
     <span class="bname">Paper Lens</span>
   </a>
   <span class="fname" id="fname"></span>
@@ -47,6 +48,7 @@ window.MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath:
     </div>
   </div>
   <button class="pill" id="syncPill" type="button" hidden></button>
+  <button class="btn icon" id="themeBtn" type="button"></button>
   <select class="btn msel" id="modelSel" aria-label="AI model"></select>
   <button class="btn icon" id="settingsBtn" type="button" aria-label="Settings" title="Settings"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
   <label class="btn pri openbtn" for="file"><span class="lbl">Open PDF</span><span class="plus" aria-hidden="true">+</span></label>
@@ -69,6 +71,7 @@ window.MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath:
   <aside id="panel" aria-label="Notes and highlights">
     <div class="ph">
       <div class="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="ovw" aria-selected="false">Overview</button>
         <button type="button" role="tab" data-tab="notes" aria-selected="true">Notes <span class="cnt" id="nCount"></span></button>
         <button type="button" role="tab" data-tab="hls" aria-selected="false">Highlights <span class="cnt" id="hCount"></span></button>
       </div>
@@ -78,11 +81,12 @@ window.MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath:
     <div id="threads" class="pane">
       <div class="howto" id="howto">
         <h3>Select anything on the page, then ask</h3>
-        <div class="step"><svg width="44" height="34" viewBox="0 0 44 34" aria-hidden="true"><rect x="4" y="5" width="36" height="24" rx="2" fill="rgba(255,214,10,.3)" stroke="#e8a800" stroke-width="2" stroke-dasharray="4 3"/></svg><div><b>Ask</b>Draw a box or freehand shape. Type your question beside it and press Enter, or hit “Just explain”.</div></div>
+        <div class="step"><svg width="44" height="34" viewBox="0 0 44 34" aria-hidden="true"><rect x="4" y="5" width="36" height="24" rx="2" fill="rgba(31,140,255,.18)" stroke="#1f8cff" stroke-width="2" stroke-dasharray="4 3"/></svg><div><b>Ask</b>Draw a box or freehand shape. Type your question beside it and press Enter, or hit “Just explain”.</div></div>
         <div class="step"><svg width="44" height="34" viewBox="0 0 44 34" aria-hidden="true"><rect x="4" y="8" width="36" height="7" rx="2" fill="#ffd60a" opacity=".8"/><rect x="4" y="19" width="26" height="7" rx="2" fill="#5cc8ff" opacity=".8"/></svg><div><b>Highlight</b>Pick the highlighter and a color, then drag over text, formulas or figures. All highlights also appear on the home page.</div></div>
         <div class="step"><svg width="44" height="34" viewBox="0 0 44 34" aria-hidden="true"><rect x="6" y="4" width="32" height="26" rx="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 13h20M12 19h14" stroke="currentColor" stroke-width="2"/></svg><div><b>Keep asking</b>Follow-ups go to the highlighted note. Clear it to ask about the whole paper.</div></div>
       </div>
     </div>
+    <div id="ovwPane" class="pane" hidden></div>
     <div id="hlPane" class="pane" hidden>
       <div class="fchips" id="hlFilters"></div>
       <div id="hlList" class="hlist"></div>
@@ -107,7 +111,7 @@ window.MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath:
 <dialog id="settings" class="settings" aria-label="Settings"></dialog>
 <div class="gate" id="gate" hidden>
   <form class="gate-card" id="gateForm" autocomplete="on">
-    <svg width="54" height="54" viewBox="0 0 512 512" aria-hidden="true"><rect width="512" height="512" rx="112" fill="#17181d"/><rect x="112" y="72" width="248" height="330" rx="18" fill="#fff"/><rect x="146" y="120" width="180" height="14" rx="7" fill="#c9c9cf"/><rect x="146" y="176" width="180" height="62" rx="8" fill="#ffd60a"/><rect x="146" y="270" width="160" height="14" rx="7" fill="#c9c9cf"/><rect x="146" y="304" width="120" height="14" rx="7" fill="#5cc8ff"/><circle cx="352" cy="330" r="78" fill="none" stroke="#ffb300" stroke-width="30"/><path d="M408 386l52 52" stroke="#ffb300" stroke-width="40" stroke-linecap="round"/></svg>
+    <svg width="54" height="54" viewBox="0 0 512 512" aria-hidden="true"><rect width="512" height="512" rx="112" fill="#06070a"/><rect x="112" y="72" width="248" height="330" rx="18" fill="#fff"/><rect x="146" y="120" width="180" height="14" rx="7" fill="#c9c9cf"/><rect x="146" y="176" width="180" height="62" rx="8" fill="#1fb8ff"/><rect x="146" y="270" width="160" height="14" rx="7" fill="#c9c9cf"/><rect x="146" y="304" width="120" height="14" rx="7" fill="#5cc8ff"/><circle cx="352" cy="330" r="78" fill="none" stroke="#1f6bff" stroke-width="30"/><path d="M408 386l52 52" stroke="#1f6bff" stroke-width="40" stroke-linecap="round"/></svg>
     <h1>Paper Lens</h1>
     <p>Your papers, highlights and notes, on every device.</p>
     <input type="text" name="username" value="paper-lens" autocomplete="username" hidden>

@@ -24,6 +24,27 @@ const onModel = e => {
   renderModelSelect();
   toast('Answers will now come from ' + v.split(':').slice(1).join(':'));
 };
+/* ---------- light / dark theme: follows the device unless you pick one ---------- */
+const THEMES = {
+  auto: ['Theme: match this device', '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor"/></svg>'],
+  light: ['Theme: light', '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'],
+  dark: ['Theme: dark', '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>'],
+};
+function applyTheme(t) {
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  const b = $('#themeBtn'), [label, icon] = THEMES[t] || THEMES.auto;
+  b.innerHTML = icon; b.title = label + ' (click to change)'; b.setAttribute('aria-label', label);
+}
+let theme = 'auto';
+try { theme = localStorage.getItem('paperlens.theme') || 'auto'; } catch (e) {}
+applyTheme(theme);
+$('#themeBtn').addEventListener('click', () => {
+  theme = { auto: 'dark', dark: 'light', light: 'auto' }[theme] || 'auto';
+  try { localStorage.setItem('paperlens.theme', theme); } catch (e) {}
+  applyTheme(theme);
+  toast(THEMES[theme][0]);
+});
+
 $('#modelSel').addEventListener('change', onModel);
 $('#modelSel2').addEventListener('change', onModel);
 $('#syncPill').addEventListener('click', () => { if (syncOn()) syncNow(); else showGate(); });

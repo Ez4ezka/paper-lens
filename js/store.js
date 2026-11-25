@@ -23,6 +23,7 @@ const DEFAULTS = {
   hlColor: 'y',
   shape: 'box',
   tool: 'ask',
+  showParts: true,                 // draw the AI dissection boxes on the pages
 };
 
 function merge(def, val) {
@@ -112,7 +113,11 @@ export function mergeData(a, b) {
     }
     return [...map.values()].sort((p, q) => (p.createdAt || 0) - (q.createdAt || 0));
   };
-  return { id: a.id || b.id, highlights: m(a.highlights, b.highlights), threads: m(a.threads, b.threads) };
+  // Whole-paper AI results (summary, dissection): the newest one wins.
+  const one = (x, y) => (!x ? y : !y ? x : (y.updatedAt || 0) > (x.updatedAt || 0) ? y : x);
+  const out = { id: a.id || b.id, highlights: m(a.highlights, b.highlights), threads: m(a.threads, b.threads) };
+  for (const k of ['summary', 'dissection']) { const v = one(a[k], b[k]); if (v) out[k] = v; }
+  return out;
 }
 export const tombstone = it => ({ id: it.id, deleted: true, createdAt: it.createdAt, updatedAt: Date.now() });
 

@@ -1,6 +1,7 @@
 // The paper reader: PDF pages, Ask + Highlight tools, notes panel, per-paper highlight list.
 import { settings, saveSettings, colorOf, getPaper, getData, saveData, getPdf, putPdf, touchOpened, mergeData, tombstone, listPapers } from './store.js';
 import { EXPLAIN, tagQuestions, needsTopic, threadTitle, firstAnswer } from './topics.js';
+import { ROLES, roleOf, buildBlocks, dissectRequest, parseDissection, summarySystem } from './structure.js';
 import { syncOn, downloadPdf } from './sync.js';
 import { chat, currentModel, PROVIDERS } from './ai.js';
 import { md, typeset } from './md.js';
@@ -51,6 +52,7 @@ export function initReader() {
   $$('[data-tab]').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
   $$('[data-mv]').forEach(b => b.addEventListener('click', () => setMobileView(b.dataset.mv)));
   $('#copyall').onclick = copyAll;
+  $('#ovwPane').addEventListener('click', onOverviewClick);
   $('#hlFilters').addEventListener('click', e => { const b = e.target.closest('[data-f]'); if (b) { R.hlFilter = b.dataset.f; renderHlList(); } });
   $('#hlList').addEventListener('click', onHlListClick);
 
@@ -116,6 +118,7 @@ function setTab(t) {
   $$('[data-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === t));
   $('#threads').hidden = t !== 'notes';
   $('#hlPane').hidden = t !== 'hls';
+  $('#ovwPane').hidden = t !== 'ovw';
   $('#ask').hidden = t !== 'notes';
 }
 function setMobileView(v) {
@@ -144,7 +147,7 @@ export async function openReader(id, focus) {
     try { blob = await downloadPdf(id); if (blob) await putPdf(id, blob); } catch (e) { toast(e.message); }
   }
   if (tok !== R.loadToken) return;
-  if (!blob) { showMissing(meta); renderThreads(); renderHlList(); return; }
+  if (!blob) { showMissing(meta); renderThreads(); renderHlList(); renderOverview(); return; }
   let doc;
   try { doc = await pdfjsLib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise; }
   catch (e) { showLoader('This PDF couldn’t be opened.'); return; }
@@ -159,14 +162,15 @@ export async function openReader(id, focus) {
     const cv = document.createElement('canvas'); cv.className = 'pc';
     const hl = document.createElementNS(NS, 'svg'); hl.setAttribute('class', 'hlv'); hl.setAttribute('viewBox', `0 0 ${vp.width} ${vp.height}`); hl.setAttribute('preserveAspectRatio', 'none');
     const ov = document.createElementNS(NS, 'svg'); ov.setAttribute('class', 'ov'); ov.setAttribute('viewBox', `0 0 ${vp.width} ${vp.height}`); ov.setAttribute('preserveAspectRatio', 'none');
+    const dv = document.createElementNS(NS, 'svg'); dv.setAttribute('class', 'disv'); dv.setAttribute('viewBox', `0 0 ${vp.width} ${vp.height}`); dv.setAttribute('preserveAspectRatio', 'none');
     const pn = document.createElement('span'); pn.className = 'pn'; pn.textContent = 'Page ' + i;
-    wrap.append(cv, hl, ov, pn); pagesEl.append(wrap);
-    R.pages.push({ n: i, page, w: vp.width, h: vp.height, wrap, hl, svg: ov, canvas: cv, rendered: 0, busy: false, visible: false });
+    wrap.append(cv, dv, hl, ov, pn); pagesEl.append(wrap);
+    R.pages.push({ n: i, page, w: vp.width, h: vp.height, wrap, hl, dis: dv, svg: ov, canvas: cv, rendered: 0, busy: false, visible: false });
   }
   hideLoader();
   showHint();
   R.fitMode = true; fit();
-  renderThreads(); renderHlList(); drawMarks();
+  renderThreads(); renderHlList(); drawMarks(); drawDissection(); renderOverview();
   touchOpened(id);
   pageText(R.pages[0]);
   viewer.scrollTop = 0;
@@ -175,6 +179,7 @@ export async function openReader(id, focus) {
 export function leaveReader() { cancelPending(); closeMenu(); }
 function teardown() {
   cancelPending(); closeMenu();
+  for (const k of ['sum', 'dis']) if (OV[k]) { OV[k].ctl.abort(); OV[k] = null; }
   for (const c of R.live) c.abort();
   R.live.clear();
   if (R.doc) { try { R.doc.destroy(); } catch (e) {} }
@@ -225,7 +230,7 @@ async function refreshFromStore() {
   if (JSON.stringify(merged) === JSON.stringify(R.data)) return;
   R.data = merged;
   const activeId = R.active && R.active.id;
-  renderThreads(); renderHlList(); drawMarks();
+  renderThreads(); renderHlList(); drawMarks(); drawDissection(); renderOverview();
   if (activeId) { const t = R.data.threads.find(x => x.id === activeId); if (t) activate(t); }
 }
 const persist = () => R.data && saveData(R.data);
@@ -389,7 +394,7 @@ async function crop(p, sh, { mask = true, outline = true, maxSide = 1500 } = {})
     path.closePath();
     const outside = new Path2D(); outside.rect(0, 0, W, H); outside.addPath(path);
     ctx.fillStyle = 'rgba(255,255,255,.82)'; ctx.fill(outside, 'evenodd');
-    if (outline) { ctx.strokeStyle = '#ff9500'; ctx.lineWidth = Math.max(2, rs * .8); ctx.stroke(path); }
+    if (outline) { ctx.strokeStyle = '#1f8cff'; ctx.lineWidth = Math.max(2, rs * .8); ctx.stroke(path); }
   }
   return c;
 }
@@ -548,6 +553,173 @@ function startPending(p, sh) {
     else if (e.key === 'Escape') { e.preventDefault(); cancelPending(); }
   });
   ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = Math.min(160, ta.scrollHeight + 2) + 'px'; placePop(); });
+}
+
+/* ================= overview: AI summary + AI dissection ================= */
+const OV = { sum: null, dis: null };   // running jobs: { ctl, status }
+
+function renderOverview() {
+  const box = $('#ovwPane'); if (!box) return;
+  const d = R.data || {}, sum = d.summary, dis = d.dissection;
+  const canDissect = !!R.pages.length;
+  const head = (what, it) => `<div class="ovh"><h3>${what}</h3><span class="muted small">${it.model ? esc(it.model.split(':').slice(1).join(':')) + ' · ' : ''}${esc(new Date(it.updatedAt || it.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))}</span></div>`;
+  box.innerHTML = `
+    <div class="ovw-actions">
+      <button type="button" class="btn pri ovb" data-ov="sum" ${OV.sum ? 'disabled' : ''}>
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M5 10h14M5 15h9M5 20h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="m18 14 1 2.4 2.4 1-2.4 1L18 21l-1-2.6-2.4-1 2.4-1Z" fill="currentColor"/></svg>
+        <span><b>${sum ? 'New summary' : 'AI summary'}</b><small>The whole paper and its main parts</small></span></button>
+      <button type="button" class="btn ovb" data-ov="dis" ${OV.dis || !canDissect ? 'disabled' : ''} ${canDissect ? '' : 'title="Open the PDF first"'}>
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="6" rx="1.5" fill="none" stroke="#e11d48" stroke-width="2"/><rect x="3" y="11" width="8" height="10" rx="1.5" fill="none" stroke="#2563eb" stroke-width="2"/><rect x="13" y="11" width="8" height="10" rx="1.5" fill="none" stroke="#16a34a" stroke-width="2"/></svg>
+        <span><b>${dis ? 'New dissection' : 'AI dissection'}</b><small>Boxes over the paper: thesis, method, results…</small></span></button>
+    </div>
+    ${OV.sum ? `<div class="ovs"><span class="think">${esc(OV.sum.status)}</span><button type="button" class="ghost" data-ov="stop-sum">Stop</button></div>` : ''}
+    ${OV.sum && OV.sum.text ? `<section class="ovsec"><div class="msg a sumtext">${md(OV.sum.text)}</div></section>` : ''}
+    ${!OV.sum && sum ? `<section class="ovsec">${head('Summary', sum)}<div class="msg a sumtext">${md(sum.text)}</div><div class="row"><button type="button" class="mini" data-ov="copy-sum">Copy</button></div></section>` : ''}
+    ${OV.dis ? `<div class="ovs"><span class="think">${esc(OV.dis.status)}</span><button type="button" class="ghost" data-ov="stop-dis">Stop</button></div>` : ''}
+    ${!OV.dis && dis && dis.parts.length ? `<section class="ovsec">${head('How this paper is built', dis)}
+      <label class="ovtoggle"><input type="checkbox" data-ov="show" ${settings.showParts ? 'checked' : ''}> Show the boxes on the paper</label>
+      <ol class="parts">${dis.parts.map((p, i) => `<li><button type="button" class="part" data-part="${i}" style="--c:${roleOf(p.role).color}">
+        <span class="prole">${esc(roleOf(p.role).label)}</span>
+        <span class="plabel">${esc(p.label.replace(new RegExp('^' + roleOf(p.role).label + ':\\s*', 'i'), ''))}</span>
+        ${p.note ? `<span class="pnote">${esc(p.note)}</span>` : ''}
+        ${p.quote ? `<span class="pquote">“${esc(p.quote)}”</span>` : ''}
+        <span class="ppage">${p.from === p.to ? 'p. ' + p.from : 'pp. ' + p.from + '–' + p.to}</span></button></li>`).join('')}</ol></section>` : ''}
+    ${!sum && !dis && !OV.sum && !OV.dis ? `<div class="ovempty"><p><b>Get the big picture before you dive in.</b></p><p><b>AI summary</b> explains what the paper is about, its main claim and each of its main parts.</p><p><b>AI dissection</b> draws see-through colored boxes over the pages, so you can see where the thesis, background, method, results and conclusion are.</p></div>` : ''}`;
+  typeset(box);
+}
+
+async function onOverviewClick(e) {
+  const b = e.target.closest('[data-ov],[data-part]'); if (!b) return;
+  const v = b.dataset.ov;
+  if (v === 'sum') runSummary();
+  else if (v === 'dis') runDissection();
+  else if (v === 'stop-sum' && OV.sum) OV.sum.ctl.abort();
+  else if (v === 'stop-dis' && OV.dis) OV.dis.ctl.abort();
+  else if (v === 'copy-sum') toast(await copyText(R.data.summary.text) ? 'Copied the summary.' : 'Couldn’t copy.');
+  else if (v === 'show') { settings.showParts = b.checked; saveSettings(); drawDissection(); }
+  else if (b.dataset.part != null) {
+    const p = R.data.dissection.parts[+b.dataset.part]; if (!p) return;
+    if (!settings.showParts) { settings.showParts = true; saveSettings(); drawDissection(); renderOverview(); }
+    const r = (p.key && p.key[0]) || p.regions[0];
+    if (r) scrollToShape(r.page, { bb: r.bb }, 'd' + p.id);
+  }
+}
+
+async function runSummary() {
+  if (!R.paper || OV.sum) return;
+  if (!currentModel()) { toast('Pick an AI model in Settings first.'); dispatchEvent(new CustomEvent('pl:open-settings')); return; }
+  const pid = R.paper.id, ctl = new AbortController();
+  OV.sum = { ctl, status: 'Reading the whole paper…', text: '' };
+  renderOverview();
+  let raf = 0;
+  try {
+    if (R.fullText == null && R.pages.length) R.fullText = await paperText();
+    if (!R.fullText) throw new Error('This paper has no readable text (it may be a scanned image).');
+    if (OV.sum && OV.sum.ctl === ctl) { OV.sum.status = 'Writing the summary…'; renderOverview(); }
+    const r = await chat({
+      system: summarySystem(R.paper.title, R.fullText), signal: ctl.signal,
+      turns: [{ role: 'user', content: 'Summarize this paper.' }],
+      onText: t => { if (!OV.sum || OV.sum.ctl !== ctl) return; OV.sum.text = t; if (!raf) raf = requestAnimationFrame(() => { raf = 0; const el = $('#ovwPane .sumtext'); if (el) el.innerHTML = md(OV.sum.text); else renderOverview(); }); },
+    });
+    if (!R.paper || R.paper.id !== pid) return;
+    const now = Date.now();
+    R.data.summary = { text: r.text, model: r.model.provider + ':' + r.model.id, createdAt: now, updatedAt: now };
+    await persist();
+  } catch (e) {
+    if (e.code !== 'cancelled') toast(e.message || 'Couldn’t write the summary.', 4500);
+  } finally {
+    cancelAnimationFrame(raf); if (OV.sum && OV.sum.ctl === ctl) OV.sum = null;
+    if (R.paper && R.paper.id === pid) renderOverview();
+  }
+}
+
+async function runDissection() {
+  if (!R.paper || OV.dis || !R.pages.length) return;
+  if (!currentModel()) { toast('Pick an AI model in Settings first.'); dispatchEvent(new CustomEvent('pl:open-settings')); return; }
+  const pid = R.paper.id, ctl = new AbortController();
+  OV.dis = { ctl, status: 'Reading every page…' };
+  renderOverview();
+  try {
+    for (const p of R.pages) await pageText(p);
+    const blocks = buildBlocks(R.pages.map(p => ({ n: p.n, w: p.w, h: p.h, items: p.items })));
+    if (!blocks.length) throw new Error('This paper has no readable text (it may be a scanned image).');
+    if (OV.dis && OV.dis.ctl === ctl) { OV.dis.status = 'Finding the thesis, method, results… (about 20 to 60 seconds)'; renderOverview(); }
+    const req = dissectRequest(R.paper.title, blocks);
+    const r = await chat({ system: req.system, turns: [{ role: 'user', content: req.user }], signal: ctl.signal });
+    const parts = parseDissection(r.text, blocks);
+    if (!parts.length) throw new Error('The AI’s answer couldn’t be read. Try again, or pick a stronger model.');
+    if (!R.paper || R.paper.id !== pid) return;
+    const now = Date.now();
+    R.data.dissection = { v: 1, parts, model: r.model.provider + ':' + r.model.id, createdAt: now, updatedAt: now };
+    settings.showParts = true; saveSettings();
+    await persist();
+    drawDissection();
+    toast(`Found ${parts.length} parts. Click one to jump to it.`);
+  } catch (e) {
+    if (e.code !== 'cancelled') toast(e.message || 'Couldn’t dissect the paper.', 4500);
+  } finally {
+    if (OV.dis && OV.dis.ctl === ctl) OV.dis = null;
+    if (R.paper && R.paper.id === pid) renderOverview();
+  }
+}
+
+// See-through colored boxes over the pages, one per part, labeled with its role.
+// Labels never cover text: above the box if there is room, else in the page margin, else a vertical tab in the gutter.
+let disTok = 0;
+async function drawDissection() {
+  const tok = ++disTok;
+  for (const p of R.pages) p.dis.innerHTML = '';
+  const dis = R.data && R.data.dissection;
+  if (!dis || !settings.showParts || !R.pages.length) return;
+  const pages = new Set(dis.parts.flatMap(pt => pt.regions.map(r => r.page)));
+  for (const n of pages) if (R.pages[n - 1]) await pageText(R.pages[n - 1]);
+  if (tok !== disTok) return;
+  const FS = 7, H = FS + 4;
+  const taken = new Map();   // page -> rects already used by text or labels
+  const blockers = p => {
+    if (!taken.has(p.n)) taken.set(p.n, (p.items || []).filter(it => it.s.trim()).map(it => [it.x + .5, it.y + .5, it.x + it.w - .5, it.y + it.h - .5]));
+    return taken.get(p.n);
+  };
+  const free = (p, r) => r[0] >= 0 && r[1] >= 0 && r[2] <= p.w && r[3] <= p.h && !blockers(p).some(b => r[0] < b[2] && r[2] > b[0] && r[1] < b[3] && r[3] > b[1]);
+  dis.parts.forEach((part, i) => {
+    const c = roleOf(part.role).color, seen = new Set();
+    for (const r of [...part.regions.map(x => ({ ...x, k: false })), ...(part.key || []).map(x => ({ ...x, k: true }))]) {
+      const p = R.pages[r.page - 1]; if (!p) continue;
+      const [x0, y0, x1, y1] = r.bb;
+      const g = document.createElementNS(NS, 'g');
+      g.setAttribute('class', 'dpart' + (r.k ? ' dkey' : '') + (part.role === 'thesis' ? ' dthesis' : ''));
+      g.style.setProperty('--c', c);
+      const box = document.createElementNS(NS, 'rect');
+      Object.entries({ x: x0, y: y0, width: x1 - x0, height: y1 - y0, rx: 3 }).forEach(([k, v]) => box.setAttribute(k, v));
+      box.dataset.key = 'd' + part.id;
+      g.append(box);
+      if (!r.k && !seen.has(r.page)) {
+        seen.add(r.page);
+        const name = roleOf(part.role).label, W = name.length * FS * .64 + 8;
+        const spots = [
+          { rect: [x0, y0 - H - .5, x0 + W, y0 - .5] },                    // above the box
+          { rect: [x0 - W - 2, y0, x0 - 2, y0 + H] },                      // in the margin to the left
+          { rect: [x0 - H - 1.5, y0, x0 - 1.5, y0 + W], vertical: true },  // a tab in the gutter
+          { rect: [x0, y0 - H - .5, x0 + W, y0 - .5] },                    // nothing is free: above anyway
+        ];
+        const spot = spots.find((sp, k) => k === spots.length - 1 || free(p, sp.rect));
+        blockers(p).push(spot.rect);
+        const [a, b, cc, d] = spot.rect;
+        const lab = document.createElementNS(NS, 'g'); lab.setAttribute('class', 'dlab');
+        lab.innerHTML = `<rect x="${a}" y="${b}" width="${cc - a}" height="${d - b}" rx="2.5"/>` + (spot.vertical
+          ? `<text x="${(a + cc) / 2}" y="${(b + d) / 2}" transform="rotate(-90 ${(a + cc) / 2} ${(b + d) / 2})" text-anchor="middle">${esc(name)}</text>`
+          : `<text x="${a + 4}" y="${(b + d) / 2 + .3}">${esc(name)}</text>`) + `<title>${esc(part.label)}${part.note ? ' — ' + esc(part.note) : ''}</title>`;
+        lab.addEventListener('pointerdown', ev => {
+          ev.stopPropagation(); ev.preventDefault();
+          setTab('ovw'); if (innerWidth < 860) setMobileView('notes');
+          const el = $(`#ovwPane [data-part="${i}"]`);
+          if (el) { el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+        });
+        g.append(lab);
+      }
+      p.dis.append(g);
+    }
+  });
 }
 
 /* ================= notes (AI threads) ================= */
