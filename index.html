@@ -74,6 +74,7 @@ window.MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath:
         <button type="button" role="tab" data-tab="ovw" aria-selected="false">Overview</button>
         <button type="button" role="tab" data-tab="notes" aria-selected="true">Notes <span class="cnt" id="nCount"></span></button>
         <button type="button" role="tab" data-tab="hls" aria-selected="false">Highlights <span class="cnt" id="hCount"></span></button>
+        <button type="button" role="tab" data-tab="refs" aria-selected="false">References <span class="cnt" id="rCount"></span></button>
       </div>
       <span class="sp"></span>
       <button type="button" class="ghost" id="copyall" title="Copy this paper’s highlights and notes as Markdown">Copy all</button>
@@ -87,6 +88,7 @@ window.MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath:
       </div>
     </div>
     <div id="ovwPane" class="pane" hidden></div>
+    <div id="refPane" class="pane" hidden></div>
     <div id="hlPane" class="pane" hidden>
       <div class="fchips" id="hlFilters"></div>
       <div id="hlList" class="hlist"></div>

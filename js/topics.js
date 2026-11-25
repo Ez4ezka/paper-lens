@@ -1,5 +1,5 @@
 // Questions across papers: what was asked, and AI topic tags so similar questions group together.
-import { chat, currentModel, menuModels } from './ai.js';
+import { chat, cheapModel } from './ai.js';
 
 // The question sent when someone selects something and presses "Just explain".
 export const EXPLAIN = 'Explain what I selected.';
@@ -27,13 +27,8 @@ export function plain(s, n = 240) {
 }
 export const needsTopic = t => !t.deleted && !t.topic && (t.turns || []).some(m => m.role === 'assistant');
 
-// Tagging is a tiny job, so use a small, cheap model from the same provider when one is in the menu.
-function taggingModel() {
-  const m = currentModel();
-  if (!m) return null;
-  const cheap = menuModels(m.provider).find(x => /haiku|mini|flash|nano|lite/i.test(x.id));
-  return cheap ? { provider: m.provider, id: cheap.id } : m;
-}
+// Tagging is a tiny job, so use a small, cheap model from the same provider.
+const taggingModel = cheapModel;
 
 /**
  * Give each question a short topic. items: [{ key, paper, question, sel, answer }].

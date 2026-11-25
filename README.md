@@ -9,6 +9,10 @@ Read research papers with AI. Open any PDF, then:
   - **AI summary**: what the paper is about, its main claim, each of its main parts with page numbers, key results, limitations and terms to know.
   - **AI dissection**: see-through colored boxes over the pages that show how the paper is built (title, abstract, problem, **thesis**, background, method, setup, results, discussion, limitations, conclusion, references), with the thesis sentence outlined. Click a part in the list to jump to it, or a label on the page to read what that part does. Paper Lens splits each page into text blocks itself and the AI only says which blocks form which part, so the boxes line up with the real text.
   - Both are saved with the paper and sync to your other devices.
+- **References** (another tab in each paper): every paper this one cites.
+  - Paper Lens finds the reference list and a small, cheap model turns it into titles, authors and years. Then it finds where each reference is cited in the text: `[2]`, `[2, 5]`, `[3–6]` or *Shazeer et al. (2017)*. Citations are lightly marked on the page; click one to open that reference.
+  - Each cited paper is looked up on Semantic Scholar, with arXiv and Crossref as backups. You get its abstract, its page and, when there is one, a free PDF.
+  - Open a reference to see each sentence that cites it. For each one, Paper Lens downloads the cited paper's free PDF and asks your AI model which passage it points to. You see the quote and what this paper takes from it. *Open the cited paper here* adds it to your library and opens it with that passage boxed. If there is no free PDF, the match uses the abstract and says so.
 - **Light and dark**: white and blue, or black and neon blue. It follows your device until you pick one with the theme button at the top.
 - **Questions**: every question you've asked, from every paper, on the home page. Each one gets a short topic from AI after its first answer (using a small, cheap model from the same provider when one is in your menu), so related questions from different papers sit together. Star (☆) questions to save them for later, filter by topic, paper or saved, search the questions and answers, click a topic to change it, and export to Markdown. *Sort with AI* tags any older questions that don't have a topic yet.
 
@@ -29,6 +33,7 @@ Paper Lens runs on **Vercel**: a static front end plus a few small server functi
   config/secrets.json         your AI keys (never sent to the browser)
   ```
 - **AI**: the browser sends your question to `/api/ai`, which adds your saved API key and streams the answer back from Claude, OpenAI or OpenRouter. API use is billed by the provider, separately from a ChatGPT Plus or Claude Pro subscription.
+- **Cited papers**: `/api/refs` looks papers up on Semantic Scholar, arXiv and Crossref, and downloads free PDFs. It only fetches public web addresses, never ones on a private network. Semantic Scholar's free service is shared by everyone and is often busy. Paper Lens waits and retries, but you can request a free key at https://www.semanticscholar.org/product/api and add it as the `S2_API_KEY` environment variable for faster, more reliable lookups.
 - **Free-plan limits**: Vercel's Hobby plan includes 1 GB of Blob storage and about 2,000 writes a month, so changes are saved in batches (about every 45 seconds, and whenever you leave the page).
 
 ## Set up
@@ -59,6 +64,7 @@ Paper Lens runs on **Vercel**: a static front end plus a few small server functi
 ## Privacy and security notes
 
 - Everything is stored in a private Blob store that only the server functions can read, and only after sign-in.
+- The References tab sends the titles of cited papers (never your notes or questions) to Semantic Scholar, arXiv and Crossref to find them.
 - Choose a strong password. Changing `APP_PASSWORD` (or `SESSION_SECRET`) signs out every device.
 
 ## Credits

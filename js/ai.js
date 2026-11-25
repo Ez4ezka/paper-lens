@@ -53,6 +53,14 @@ export function menuModels(p) {
   if (cur.provider === p && cur.id && !ids.includes(cur.id)) ids.push(cur.id);
   return ids.map(id => ({ id, name: name(id) }));
 }
+// A small, cheap model from the same provider for simple jobs (tagging, reading a reference list).
+export function cheapModel() {
+  const m = currentModel();
+  if (!m) return null;
+  const ids = [...menuModels(m.provider).map(x => x.id), ...(settings.models[m.provider] || []).map(x => x.id)];
+  const id = ids.find(x => /haiku|mini|flash|nano|lite/i.test(x));
+  return id ? { provider: m.provider, id } : m;
+}
 export function currentModel() {
   let { provider, id } = parseModel(settings.model);
   if (provider && hasKey(provider) && id) return { provider, id };

@@ -117,7 +117,7 @@ export function mergeData(a, b) {
   // Whole-paper AI results (summary, dissection): the newest one wins.
   const one = (x, y) => (!x ? y : !y ? x : (y.updatedAt || 0) > (x.updatedAt || 0) ? y : x);
   const out = { id: a.id || b.id, highlights: m(a.highlights, b.highlights), threads: m(a.threads, b.threads) };
-  for (const k of ['summary', 'dissection']) { const v = one(a[k], b[k]); if (v) out[k] = v; }
+  for (const k of ['summary', 'dissection', 'refs']) { const v = one(a[k], b[k]); if (v) out[k] = v; }
   return out;
 }
 export const tombstone = it => ({ id: it.id, deleted: true, createdAt: it.createdAt, updatedAt: Date.now() });

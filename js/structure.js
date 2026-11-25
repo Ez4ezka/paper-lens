@@ -116,7 +116,7 @@ Rules:
 const words = s => (s.toLowerCase().normalize('NFKD').match(/[a-z0-9]+/g) || []);
 
 // Find the lines that hold a quoted sentence, so it can get its own box.
-function quoteRegions(quote, blocks) {
+export function quoteRegions(quote, blocks) {
   const q = new Set(words(quote));
   if (q.size < 3) return [];
   let best = null;

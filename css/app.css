@@ -345,3 +345,48 @@ textarea.inp{resize:vertical;font-size:14px;line-height:1.45}
 }
 @media(max-width:520px){.seg button{padding:0 7px;min-width:32px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ---------- References tab ---------- */
+.rtools{display:flex;gap:8px}
+.rtools input{flex:1;min-width:0}.rtools select{width:auto}
+.rsum{margin:0;font-size:13px;color:var(--mute);line-height:1.6}
+.rsum b{color:var(--ink)}
+.rsum .rlinks{display:block}
+.rlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.ref{border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}
+.ref.open{border-color:color-mix(in srgb,var(--hl) 55%,var(--line))}
+.ref.flash{animation:rfl 1.3s ease-out}
+@keyframes rfl{0%{box-shadow:0 0 0 3px var(--hl)}100%{box-shadow:0 0 0 0 transparent}}
+.rhd{display:grid;grid-template-columns:auto 1fr;gap:2px 9px;width:100%;text-align:left;border:0;background:none;padding:10px 12px;color:var(--ink);cursor:pointer}
+.rhd:hover{background:var(--panel2)}
+.rn{grid-row:span 3;align-self:start;min-width:24px;text-align:center;font:600 11.5px/20px Inter,sans-serif;border-radius:6px;background:var(--panel2);color:var(--mute);padding:0 5px}
+.rt{font-weight:600;font-size:13.5px;line-height:1.35}
+.rm{font-size:12px;color:var(--mute);grid-column:2}
+.rbs{grid-column:2;display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
+.rb{font-size:11px;border-radius:999px;padding:1px 8px;background:var(--panel2);color:var(--mute)}
+.rb.ok{background:color-mix(in srgb,#16a34a 16%,transparent);color:color-mix(in srgb,#16a34a 80%,var(--ink))}
+.rb.no{background:color-mix(in srgb,#dc2626 12%,transparent);color:color-mix(in srgb,#dc2626 75%,var(--ink))}
+.rb.c{background:color-mix(in srgb,var(--hl) 14%,transparent);color:color-mix(in srgb,var(--hl) 75%,var(--ink))}
+.rb.wait{animation:pulse .9s ease-in-out infinite alternate}
+.rbody{padding:2px 12px 12px;display:flex;flex-direction:column;gap:10px;font-size:13px}
+.rbody .rlinks a{color:var(--ink)}
+.rabs summary{cursor:pointer;color:var(--mute);font-size:12.5px}
+.rabs p{margin:6px 0 0;color:var(--mute);line-height:1.5}
+.rcite{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:10px}
+.rlab{display:block;font:600 10.5px/1.6 Inter,sans-serif;text-transform:uppercase;letter-spacing:.04em;color:var(--mute)}
+.rsent{text-align:left;border:0;background:var(--panel2);border-radius:9px;padding:8px 10px;color:var(--ink);line-height:1.45;cursor:pointer;font-size:13px}
+.rsent:hover{background:color-mix(in srgb,var(--hl) 10%,var(--panel2))}
+.rmatch{border-left:3px solid var(--hl);padding:2px 0 2px 10px;display:flex;flex-direction:column;gap:5px;align-items:flex-start}
+.rq{font-style:italic;line-height:1.45}
+.rwhy{color:var(--mute);line-height:1.45}
+.pw .ov .citem{pointer-events:auto;cursor:pointer;fill:color-mix(in srgb,var(--hl) 12%,transparent);stroke:color-mix(in srgb,var(--hl) 45%,transparent);stroke-width:.8;vector-effect:non-scaling-stroke}
+.pw .ov .citem:hover{fill:color-mix(in srgb,var(--hl) 30%,transparent)}
+.citem.flash{animation:cfl 1.2s ease-out}
+@keyframes cfl{0%{fill:color-mix(in srgb,var(--hl) 60%,transparent)}100%{fill:color-mix(in srgb,var(--hl) 12%,transparent)}}
+.pw .ov .citefocus{pointer-events:auto;cursor:pointer}
+.citefocus rect{fill:color-mix(in srgb,var(--hl) 8%,transparent);stroke:var(--hl);stroke-width:1.6;stroke-dasharray:6 3;vector-effect:non-scaling-stroke}
+.citefocus rect.ck{fill:color-mix(in srgb,var(--hl) 22%,transparent);stroke-width:2;stroke-dasharray:none}
+.citefocus rect.flash{animation:cff 1.4s ease-out}
+@keyframes cff{0%{fill:color-mix(in srgb,var(--hl) 50%,transparent)}100%{fill:color-mix(in srgb,var(--hl) 14%,transparent)}}
+.tabs{min-width:0;overflow-x:auto;scrollbar-width:none}
+.tabs button{padding:10px 9px 11px;white-space:nowrap}

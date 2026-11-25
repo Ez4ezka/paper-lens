@@ -7,6 +7,7 @@ import { chat, currentModel, PROVIDERS } from './ai.js';
 import { md, typeset } from './md.js';
 import { $, $$, esc, uid, toast, inPoly, canvasToBlob, canvasThumb, copyText, sha256Hex } from './util.js';
 import { swatchesHTML, hlCardHTML, renderModelSelect } from './ui.js';
+import { initRefPane, onRefsTab, renderRefs, drawCiteMarks, refsTeardown, showCitedSpot } from './refpane.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const R = {
@@ -53,6 +54,7 @@ export function initReader() {
   $$('[data-mv]').forEach(b => b.addEventListener('click', () => setMobileView(b.dataset.mv)));
   $('#copyall').onclick = copyAll;
   $('#ovwPane').addEventListener('click', onOverviewClick);
+  initRefPane({ R, pageText, scrollToShape, setTab, setMobileView, persist: () => persist() });
   $('#hlFilters').addEventListener('click', e => { const b = e.target.closest('[data-f]'); if (b) { R.hlFilter = b.dataset.f; renderHlList(); } });
   $('#hlList').addEventListener('click', onHlListClick);
 
@@ -119,7 +121,9 @@ function setTab(t) {
   $('#threads').hidden = t !== 'notes';
   $('#hlPane').hidden = t !== 'hls';
   $('#ovwPane').hidden = t !== 'ovw';
+  $('#refPane').hidden = t !== 'refs';
   $('#ask').hidden = t !== 'notes';
+  if (t === 'refs') onRefsTab();
 }
 function setMobileView(v) {
   document.body.classList.toggle('mv-notes', v === 'notes');
@@ -147,7 +151,7 @@ export async function openReader(id, focus) {
     try { blob = await downloadPdf(id); if (blob) await putPdf(id, blob); } catch (e) { toast(e.message); }
   }
   if (tok !== R.loadToken) return;
-  if (!blob) { showMissing(meta); renderThreads(); renderHlList(); renderOverview(); return; }
+  if (!blob) { showMissing(meta); renderThreads(); renderHlList(); renderOverview(); renderRefs(); return; }
   let doc;
   try { doc = await pdfjsLib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise; }
   catch (e) { showLoader('This PDF couldn’t be opened.'); return; }
@@ -170,7 +174,7 @@ export async function openReader(id, focus) {
   hideLoader();
   showHint();
   R.fitMode = true; fit();
-  renderThreads(); renderHlList(); drawMarks(); drawDissection(); renderOverview();
+  renderThreads(); renderHlList(); drawMarks(); drawDissection(); renderOverview(); drawCiteMarks(); renderRefs();
   touchOpened(id);
   pageText(R.pages[0]);
   viewer.scrollTop = 0;
@@ -180,6 +184,7 @@ export function leaveReader() { cancelPending(); closeMenu(); }
 function teardown() {
   cancelPending(); closeMenu();
   for (const k of ['sum', 'dis']) if (OV[k]) { OV[k].ctl.abort(); OV[k] = null; }
+  refsTeardown();
   for (const c of R.live) c.abort();
   R.live.clear();
   if (R.doc) { try { R.doc.destroy(); } catch (e) {} }
@@ -210,6 +215,7 @@ function applyFocus(focus) {
   if (!focus) return;
   if (focus.h) { const h = R.data.highlights.find(x => x.id === focus.h && !x.deleted); if (h) { setTab('hls'); scrollToShape(h.page, h.sh, 'h' + h.id); } }
   if (focus.t) { const t = R.data.threads.find(x => x.id === focus.t); if (t) { activate(t, true); if (t.sh) scrollToShape(t.page, t.sh, 't' + t.id); } }
+  if (focus.x && R.pages.length) showCitedSpot(focus.x);
 }
 function scrollToShape(page, sh, key) {
   const p = R.pages[page - 1]; if (!p) return;
@@ -230,7 +236,7 @@ async function refreshFromStore() {
   if (JSON.stringify(merged) === JSON.stringify(R.data)) return;
   R.data = merged;
   const activeId = R.active && R.active.id;
-  renderThreads(); renderHlList(); drawMarks(); drawDissection(); renderOverview();
+  renderThreads(); renderHlList(); drawMarks(); drawDissection(); renderOverview(); drawCiteMarks(); renderRefs();
   if (activeId) { const t = R.data.threads.find(x => x.id === activeId); if (t) activate(t); }
 }
 const persist = () => R.data && saveData(R.data);

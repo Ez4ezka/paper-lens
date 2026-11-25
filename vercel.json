@@ -3,7 +3,8 @@
   "functions": {
     "api/ai.js": { "maxDuration": 300 },
     "api/models.js": { "maxDuration": 30 },
-    "api/file.js": { "maxDuration": 60 }
+    "api/file.js": { "maxDuration": 60 },
+    "api/refs.js": { "maxDuration": 60 }
   },
   "headers": [
     { "source": "/(.*)", "headers": [
