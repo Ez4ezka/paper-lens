@@ -8,6 +8,10 @@ const URLS = {
   openrouter: () => (process.env.PL_OPENROUTER_URL || 'https://openrouter.ai') + '/api/v1/chat/completions',
 };
 
+const EFFORT_MODELS = /^claude-(opus-(4-[5-9]|5)|sonnet-(4-6|5)|haiku-5|fable|mythos)/;
+const XHIGH_MODELS = /^claude-(opus-(4-[7-9]|5)|sonnet-5|haiku-5|fable|mythos)/;
+const FALLBACK_MODELS = /^claude-(opus-5|sonnet-5-5|fable-5|mythos-5)/;
+
 export default {
   async fetch(req) {
     if (!authed(req)) return denied();
@@ -15,6 +19,7 @@ export default {
     let b = {};
     try { b = await req.json(); } catch (e) { return json({ error: 'Bad request.' }, 400); }
     const { provider, model, system = '', turns = [], image } = b;
+    const effort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(b.effort) ? b.effort : null;
     if (!URLS[provider] || typeof model !== 'string' || !model) return json({ error: 'Pick a model first.' }, 400);
     if (!Array.isArray(turns) || !turns.length) return json({ error: 'Nothing to ask.' }, 400);
     const key = (await getSecrets()).keys[provider];
@@ -30,11 +35,14 @@ export default {
         const messages = clean.map((t, i) => (i === clean.length - 1 && t.role === 'user' && img)
           ? { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: img.mime, data: img.data } }, { type: 'text', text: t.content }] }
           : t);
-        upstream = await fetch(URLS.anthropic(), {
-          method: 'POST', signal: req.signal,
-          headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-          body: JSON.stringify({ model, max_tokens: 4096, system, messages, stream: true }),
-        });
+        // Thinking counts toward max_tokens on current Claude models, so leave room for it (streaming, so no timeout risk).
+        const body = { model, max_tokens: 32000, system, messages, stream: true };
+        const headers = { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
+        // How hard the model thinks. Only models that support effort get it; older ones would reject the field.
+        if (effort && EFFORT_MODELS.test(model)) body.output_config = { effort: effort === 'xhigh' && !XHIGH_MODELS.test(model) ? 'high' : effort };
+        // If Claude's safety check declines a request, let Anthropic retry it on its recommended fallback model.
+        if (FALLBACK_MODELS.test(model)) { headers['anthropic-beta'] = 'server-side-fallback-2026-07-01'; body.fallbacks = 'default'; }
+        upstream = await fetch(URLS.anthropic(), { method: 'POST', signal: req.signal, headers, body: JSON.stringify(body) });
       } else {
         const messages = [{ role: 'system', content: system }, ...clean.map((t, i) => (i === clean.length - 1 && t.role === 'user' && img)
           ? { role: 'user', content: [{ type: 'text', text: t.content }, { type: 'image_url', image_url: { url: img.url } }] }

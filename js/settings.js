@@ -74,6 +74,9 @@ function render() {
     <h3>AI models</h3>
     <p class="help">Paste an API key once and it’s saved privately on your Paper Lens server, so it works on every device you sign in on. The key is never sent back to your browser. API use is billed by the provider, separately from a ChatGPT Plus or Claude Pro subscription. Pick the model from the menu at the top of the page.</p>
     ${Object.keys(PROVIDERS).map(provHTML).join('')}
+    <label class="lbl-b" for="effortSel">Effort (Claude models)</label>
+    <select id="effortSel" class="inp">${[['low', 'Low: fastest and cheapest'], ['medium', 'Medium: balanced (recommended)'], ['high', 'High: thinks longer'], ['max', 'Max: deepest, slowest, most expensive']].map(([v, l]) => `<option value="${v}" ${settings.effort === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    <p class="muted small">How much Claude thinks before it answers. Higher effort can give better answers on hard parts of a paper but takes longer and costs more. ChatGPT and OpenRouter models ignore this.</p>
     <label class="lbl-b" for="styleTa">How answers should sound</label>
     <textarea id="styleTa" class="inp" rows="6" placeholder="${esc(DEFAULT_STYLE)}">${esc(settings.style)}</textarea>
     <p class="muted small">Leave empty to use the default shown above. This is sent with every question, whichever model you use.</p>
@@ -148,6 +151,7 @@ function bind() {
     });
   });
 
+  dlg.querySelector('#effortSel').addEventListener('change', e => { settings.effort = e.target.value; saveSettings(); toast('Effort: ' + e.target.value); });
   const sty = dlg.querySelector('#styleTa');
   let st = 0;
   sty.addEventListener('input', () => { clearTimeout(st); st = setTimeout(() => { settings.style = sty.value; saveSettings(); }, 800); });

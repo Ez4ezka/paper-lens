@@ -57,7 +57,7 @@ Rules:
 - Broad enough that several questions can share a topic, specific enough to be useful. Not the paper's title.
 - Reuse an existing topic whenever it fits, spelled exactly the same.${known.length ? `\n- Existing topics: ${known.map(t => JSON.stringify(t)).join(', ')}` : ''}
 - Reply with only a JSON object mapping each key to its topic, nothing else.`;
-    const r = await chat({ system, model, turns: [{ role: 'user', content: JSON.stringify(list) }] });
+    const r = await chat({ system, model, effort: 'low', turns: [{ role: 'user', content: JSON.stringify(list) }] });
     const m = r.text.match(/\{[\s\S]*\}/);
     let j = {};
     try { j = m ? JSON.parse(m[0]) : {}; } catch (e) {}

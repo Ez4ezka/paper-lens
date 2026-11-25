@@ -102,7 +102,7 @@ function friendly(status, msg, provider) {
  * system: instructions; turns: [{role:'user'|'assistant', content:string}] ending on user;
  * image: optional Blob attached to the last user turn.
  */
-export async function chat({ system, turns, image, onText, signal, model }) {
+export async function chat({ system, turns, image, onText, signal, model, effort }) {
   const m = model || currentModel();
   if (!m) throw new AIError('Pick a model and save an API key in Settings first.', 'setup');
   if (!hasKey(m.provider)) throw new AIError(`Save your ${PROVIDERS[m.provider].name} API key in Settings.`, 'setup');
@@ -111,7 +111,7 @@ export async function chat({ system, turns, image, onText, signal, model }) {
   try {
     res = await api('api/ai', {
       method: 'POST', signal, headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ provider: m.provider, model: m.id, system, turns: turns.map(t => ({ role: t.role, content: t.content })), image: img }),
+      body: JSON.stringify({ provider: m.provider, model: m.id, effort: effort || settings.effort || 'medium', system, turns: turns.map(t => ({ role: t.role, content: t.content })), image: img }),
     });
   } catch (e) {
     if (e.name === 'AbortError') throw new AIError('Stopped.', 'cancelled');
@@ -131,6 +131,8 @@ export async function chat({ system, turns, image, onText, signal, model }) {
       if (m.provider === 'anthropic') {
         if (j.type === 'content_block_delta' && j.delta && j.delta.type === 'text_delta') d = j.delta.text;
         if (j.type === 'message_delta' && j.delta && j.delta.stop_reason === 'max_tokens') truncated = true;
+        if (j.type === 'message_delta' && j.delta && j.delta.stop_reason === 'refusal')
+          throw new AIError('Claude’s safety check declined this request, and no fallback model could answer it. Try rephrasing, or pick another model.', 'refusal');
       } else {
         const c = j.choices && j.choices[0];
         if (c && c.delta && typeof c.delta.content === 'string') d = c.delta.content;
@@ -140,7 +142,7 @@ export async function chat({ system, turns, image, onText, signal, model }) {
     }
   } catch (e) {
     if (e.name === 'AbortError') { const er = new AIError('Stopped.', 'cancelled'); er.partial = text; throw er; }
-    if (e instanceof AIError) { e.partial = text; throw e; }
+    if (e instanceof AIError) { e.partial = e.code === 'refusal' ? '' : text; throw e; }
     const er = new AIError('The answer was interrupted. Try again.', 'network'); er.partial = text; throw er;
   }
   if (!text.trim()) throw new AIError('No answer came back. Try again or pick another model.', 'empty');

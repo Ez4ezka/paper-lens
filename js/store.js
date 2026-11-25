@@ -20,6 +20,7 @@ const DEFAULTS = {
   custom: { anthropic: [], openai: [], openrouter: [] },
   colors: DEFAULT_COLORS,
   style: '',
+  effort: 'medium',                // how hard Claude thinks: low, medium, high, max
   hlColor: 'y',
   shape: 'box',
   tool: 'ask',
@@ -43,7 +44,7 @@ function load() {
 }
 export const settings = load();
 // Preferences shared across devices through the cloud.
-const SHARED = ['model', 'models', 'pins', 'custom', 'colors', 'style'];
+const SHARED = ['model', 'models', 'pins', 'custom', 'colors', 'style', 'effort'];
 export const sharedPrefs = () => Object.fromEntries(SHARED.map(k => [k, settings[k]]));
 let lastShared = JSON.stringify(sharedPrefs());
 export function saveSettings() {
