@@ -65,6 +65,7 @@ export function initReader() {
   d.addEventListener('pointerup', () => { on = false; });
 
   bindDrawing();
+  bindTouch();
   addEventListener('keydown', onKey);
   addEventListener('pl:pulled', refreshFromStore);
   setTool(settings.tool || 'ask', true); setShape(settings.shape || 'box', true); renderSwatches();
@@ -90,7 +91,12 @@ function setTool(t, quiet) {
   pagesEl.classList.toggle('marking', t === 'mark');
   $('#swatches').hidden = t !== 'mark';
   showHint();
-  $('#hint').innerHTML = t === 'mark'
+  const touch = matchMedia('(pointer:coarse)').matches;
+  $('#hint').innerHTML = touch
+    ? (t === 'mark' ? 'Drag over text to highlight it · two fingers to scroll or zoom'
+      : t === 'ask' ? 'Draw around anything to ask about it · two fingers to scroll or zoom'
+      : 'Scroll mode · tap a highlight or note to open it · pinch to zoom')
+    : t === 'mark'
     ? 'Drag over text, a formula or a figure to highlight it · <kbd>1</kbd>–<kbd>5</kbd> change color · click a highlight to add a note'
     : t === 'ask' ? 'Draw around anything, type your question, press <kbd>Enter</kbd> · <kbd>M</kbd> highlighter · <kbd>F</kbd> freehand'
     : 'Scroll mode · click a highlight or note to open it';
@@ -133,11 +139,12 @@ function setMobileView(v) {
 /* ================= open / close ================= */
 export async function openReader(id, focus) {
   const tok = ++R.loadToken;
-  if (R.paper && R.paper.id === id && R.doc) { applyFocus(focus); return; }
+  if (R.paper && R.paper.id === id && R.doc) { $('#fname').textContent = R.paper.title; document.title = R.paper.title + ' · Paper Lens'; applyFocus(focus); return; }
   teardown();
   const meta = await getPaper(id);
   if (!meta || meta.deleted) { toast('That paper isn’t in your library.'); location.hash = '#/'; return; }
   R.paper = meta;
+  updateCtx();
   $('#fname').textContent = meta.title;
   document.title = meta.title + ' · Paper Lens';
   const data = await getData(id);
@@ -280,12 +287,59 @@ function fit() {
   setScale(Math.min(2.2, (viewer.clientWidth - (innerWidth < 600 ? 16 : 40)) / w));
 }
 
+/* ================= touch: two fingers scroll and pinch-zoom, whatever tool is on ================= */
+function bindTouch() {
+  let g = null;
+  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const mid = t => [(t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2];
+  const reset = () => { pagesEl.style.transform = ''; pagesEl.style.transformOrigin = ''; };
+  viewer.addEventListener('touchstart', e => {
+    if (e.touches.length !== 2 || !R.pages.length) { if (e.touches.length > 2 && g) { reset(); g = null; } return; }
+    dispatchEvent(new CustomEvent('pl:multitouch'));
+    const pr = pagesEl.getBoundingClientRect(), m = mid(e.touches);
+    g = { d0: dist(e.touches) || 1, m0: m, m: m, k: 1, o: [m[0] - pr.left, m[1] - pr.top], sl: viewer.scrollLeft, st: viewer.scrollTop };
+    pagesEl.style.transformOrigin = `${g.o[0]}px ${g.o[1]}px`;
+  }, { passive: true });
+  viewer.addEventListener('touchmove', e => {
+    if (!g || e.touches.length !== 2) return;
+    if (!e.cancelable) { reset(); g = null; return; }   // the browser is already scrolling; let it
+    e.preventDefault();
+    g.m = mid(e.touches);
+    g.k = Math.max(.4 / R.scale, Math.min(4 / R.scale, dist(e.touches) / g.d0));
+    pagesEl.style.transform = `translate(${g.m[0] - g.m0[0]}px, ${g.m[1] - g.m0[1]}px) scale(${g.k})`;
+  }, { passive: false });
+  const end = e => {
+    if (!g || e.touches.length >= 2) return;
+    const { k, m, m0, o, sl, st } = g; g = null;
+    reset();
+    if (Math.abs(k - 1) > .02) {
+      R.fitMode = false;
+      setScale(R.scale * k);
+      // keep the spot between your fingers under your fingers
+      viewer.scrollLeft = sl + o[0] * (k - 1) - (m[0] - m0[0]);
+      viewer.scrollTop = st + o[1] * (k - 1) - (m[1] - m0[1]);
+    } else {
+      viewer.scrollLeft = sl - (m[0] - m0[0]);
+      viewer.scrollTop = st - (m[1] - m0[1]);
+    }
+  };
+  viewer.addEventListener('touchend', end);
+  viewer.addEventListener('touchcancel', end);
+  viewer.addEventListener('gesturestart', e => e.preventDefault());   // iOS: don't zoom the whole page
+}
+
 /* ================= drawing ================= */
 function bindDrawing() {
   let cur = null;
+  const fingers = new Set();   // touch points on the pages; two or more = scroll / zoom, not a selection
+  const dropCur = () => { if (cur && cur.el) cur.el.remove(); cur = null; };
+  pagesEl.addEventListener('pointerup', e => fingers.delete(e.pointerId), true);
+  pagesEl.addEventListener('pointercancel', e => fingers.delete(e.pointerId), true);
+  addEventListener('pl:multitouch', dropCur);
   const pt = (p, e) => { const r = p.wrap.getBoundingClientRect(); return [Math.max(0, Math.min(p.w, (e.clientX - r.left) / R.scale)), Math.max(0, Math.min(p.h, (e.clientY - r.top) / R.scale))]; };
   const pageOf = w => R.pages[+w.dataset.n - 1];
   pagesEl.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'touch') { fingers.add(e.pointerId); if (fingers.size > 1) { dropCur(); return; } }
     if (e.button !== 0 || e.target.closest('.pop,.tag')) return;
     const w = e.target.closest('.pw'); if (!w) return;
     const p = pageOf(w); if (!p) return;

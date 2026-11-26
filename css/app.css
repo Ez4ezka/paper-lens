@@ -160,8 +160,9 @@ h2{font-size:20px;margin:0 0 14px;letter-spacing:-.01em}
 .split{display:grid;grid-template-columns:minmax(0,1fr) 8px var(--panelW);height:calc(100dvh - var(--barH))}
 .mtabs{display:none}
 #viewer{position:relative;overflow:auto;padding:24px 16px 80px;background:var(--desk);overscroll-behavior:contain}
+@media(pointer:coarse){#viewer{touch-action:pan-x pan-y}}
 #pages{display:flex;flex-direction:column;align-items:center;gap:18px}
-.pw{position:relative;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3),0 8px 28px rgba(0,0,0,.35);flex:none;user-select:none;-webkit-user-select:none}
+.pw{position:relative;background:#fff;-webkit-touch-callout:none;box-shadow:0 1px 2px rgba(0,0,0,.3),0 8px 28px rgba(0,0,0,.35);flex:none;user-select:none;-webkit-user-select:none}
 .pw .pc{position:absolute;inset:0;width:100%;height:100%}
 .pw .hlv,.pw .ov{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
 .pw .hlv{mix-blend-mode:multiply}
@@ -320,6 +321,10 @@ textarea.inp{resize:vertical;font-size:14px;line-height:1.45}
 .toast.show{opacity:1}
 
 /* ---------- narrow screens ---------- */
+#copyall{display:inline-flex;align-items:center;gap:6px;flex:none;white-space:nowrap}
+.cpi{display:none}
+.tabs button{flex:none}
+@media(max-width:1280px){body[data-view=reader] .bname{display:none}.pill .lbl{display:none}.pill{padding:0 11px}select.btn{max-width:170px}}
 @media(max-width:1100px){.tools .lbl{display:none}.fname{max-width:16ch}}
 @media(max-width:860px){
   :root{--barH:54px}
@@ -343,7 +348,45 @@ textarea.inp{resize:vertical;font-size:14px;line-height:1.45}
   .hgrid{columns:1}
   .hl-tools{justify-content:flex-start}
 }
+@media(max-width:860px){
+  .bar{gap:6px}
+  #modelSel{flex:0 1 150px;min-width:0;max-width:150px}
+  /* reader on a phone: the paper's title up top, the tools in a floating bar at the bottom, by your thumb */
+  body[data-view=reader] .fname{display:block;flex:1 1 auto;min-width:0;max-width:none}
+  body[data-view=reader] .bar .sp{display:none}
+  body[data-view=reader] #readerTools{position:fixed;z-index:16;left:50%;transform:translateX(-50%);bottom:calc(10px + env(safe-area-inset-bottom));background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:5px;gap:5px;box-shadow:0 10px 30px rgba(0,0,0,.35);max-width:calc(100vw - 12px);overflow-x:auto;scrollbar-width:none}
+  body[data-view=reader].mv-notes #readerTools{display:none}
+  #readerTools .seg{padding:2px;border-radius:11px}
+  #readerTools .seg button{height:38px;min-width:38px;padding:0 6px;border-radius:9px}
+  #readerTools .zoom{display:flex}
+  .zoomv{min-width:40px}
+  .swatches{top:auto;bottom:calc(72px + env(safe-area-inset-bottom))}
+  #viewer{padding-bottom:calc(120px + env(safe-area-inset-bottom))}
+  .hint{bottom:calc(66px + env(safe-area-inset-bottom));transform:none;font-size:12px;max-width:calc(100% - 16px)}
+  /* panel tabs fit, Copy all becomes an icon */
+  .tabs button{padding:10px 8px 11px;font-size:13.5px}
+  .cpi{display:block}.cpl{display:none}
+  #copyall{width:38px;justify-content:center;padding:0}
+}
+@media(max-width:600px){
+  /* Settings fills the screen */
+  dialog.settings{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border-radius:0}
+  .set{max-height:100dvh;height:100%}
+  .set-h{padding-top:max(14px,env(safe-area-inset-top))}
+  .set-nav{display:none}
+  .set-h [data-close]{margin-left:auto}
+  .set-body{padding-bottom:max(24px,env(safe-area-inset-bottom))}
+}
 @media(max-width:520px){.seg button{padding:0 7px;min-width:32px}}
+@media(max-width:400px){.zoomv{display:none}.tabs button{padding:10px 6px 11px;font-size:13px}.ph{gap:4px;padding-left:4px}#modelSel{flex-basis:118px;max-width:118px}}
+/* touch screens: bigger targets, and text boxes at 16px so iPhones don't zoom in when you tap them */
+@media(pointer:coarse){
+  input:not([type=checkbox]):not([type=radio]):not([type=color]),select,textarea{font-size:16px!important}
+  .mini{min-height:36px}
+  .linkbtn{padding:6px 0}
+  .chip button{padding:6px 9px}
+  .rhd{padding:12px}
+}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* ---------- References tab ---------- */
